@@ -1,0 +1,13 @@
+/******************************* WIFI **************************************/
+#define WIFI_SSID       "YOUR_WIFI_SSID"
+#define WIFI_PASS       "YOUR_WIFI_PASS"
+
+//***************************SECURE OTA**************************************
+#define USERNAME "YOUR_USERNAME"
+#definde PASSWORD "YOUR_PASSWORD"
+
+//***************************OWN MQTT SERVER********************************/
+#define MQTT_IP "IP-ADRESS OF YOUR MQTT BROKER"
+#define MQTT_PORT PORT OF YOUR BROKER
+#define MQTT_USR "YOUR USER NAME ON YOUR BROKER"
+#define MQTT_PW "YOUR PASSWD ON YOUR BROKER"

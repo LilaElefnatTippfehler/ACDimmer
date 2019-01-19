@@ -111,7 +111,11 @@ void getPeriod(){
                 period = EXPPERIOD;
                 return;
         }
-        periodBuffer[readings%PERIODBUFFER] = thisZC - lastZC;
+        if((thisZC - lastZC)>=(EXPPERIOD+200)||(thisZC - lastZC)<=(EXPPERIOD-200)) {
+                periodBuffer[readings%PERIODBUFFER] = periodBuffer[readings%PERIODBUFFER-1];
+        }else{
+                periodBuffer[readings%PERIODBUFFER] = thisZC - lastZC;
+        }
         lastZC = thisZC;
         if(!(readings%PERIODBUFFER)) {
                 for(int i = 0; i<PERIODBUFFER; i++) {

@@ -15,6 +15,7 @@
 void init_dimmer();
 void dimmer_set(int duty);
 void dimmer_move(int duty);
+void dimmer_move(int duty, int time_ms);
 void dimmer_on();
 void dimmer_off();
 void dimmer();

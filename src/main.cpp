@@ -20,11 +20,8 @@ PubSubClient client(MQTT_IP,MQTT_PORT,callback,espClient);
 
 
 void setup() {
-
-        init_dimmer();
-        dimmer_set(70);
-
         Serial.begin(115200);
+        init_dimmer();
         WiFi.mode(WIFI_STA);
         WiFi.begin(WIFI_SSID,WIFI_PASS);
         while (WiFi.status() != WL_CONNECTED) {
@@ -35,7 +32,6 @@ void setup() {
         Serial.println("");
         Serial.print("Connected, IP address: ");
         Serial.println(WiFi.localIP());
-
 
 }
 

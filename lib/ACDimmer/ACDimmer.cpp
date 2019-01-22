@@ -11,6 +11,7 @@ uint8_t flag_ZC = 0;
 uint8_t flag_timer1 = 0;
 uint8_t flag_ticker = 0;
 uint8_t flag_ini = 0;
+uint8_t status = 2;
 unsigned long lastZC = 0;
 unsigned long thisZC = 0;
 long periodBuffer[PERIODBUFFER];
@@ -20,6 +21,7 @@ int trigger = 0;
 uint32_t tLow = 0;
 int duty_save = 0;
 int duty_goal = 0;
+int duty_old = 0;
 int direction = -1;
 unsigned long steps = 0;
 
@@ -80,11 +82,17 @@ void dimmer_set(int duty){
 }
 
 void dimmer_on(){
-        updateTime(duty_save);
+        if(duty_old <= 10) {
+                dimmer_move(100);
+        }
+        status = 1;
+        dimmer_move(duty_old);
 }
 
 void dimmer_off(){
-        updateTime(1);
+        duty_old = duty_save;
+        status = 0;
+        dimmer_move(0);
 }
 
 void updateTime(int time){
@@ -165,6 +173,30 @@ void dimmer(){
 
         }
 
+}
+
+int dimmer_status(){
+        if(status == 1) {
+                return 1;
+        }
+        if(status == 0) {
+                return 0;
+        }
+        if(duty_save >= 11) {
+                return 1;
+        }
+        if(duty_save <= 10) {
+                return 0;
+        }
+        return -1;
+}
+
+void dimmer_up(){
+        dimmer_set(duty_save+1);
+}
+
+void dimmer_down(){
+        dimmer_set(duty_save-1);
 }
 
 void initPeriod(){

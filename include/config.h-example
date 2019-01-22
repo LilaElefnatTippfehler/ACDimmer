@@ -11,3 +11,6 @@
 #define MQTT_PORT PORT OF YOUR BROKER
 #define MQTT_USR "YOUR USER NAME ON YOUR BROKER"
 #define MQTT_PW "YOUR PASSWD ON YOUR BROKER"
+
+//***************************DEVICE NAME***********************************
+#define DEVICE_NAME "MyName"

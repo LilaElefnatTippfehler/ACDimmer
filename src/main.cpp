@@ -8,13 +8,23 @@
 #include "ACDimmer.h"
 #include "config.h"
 
-#define DEVICE_NAME "DimmerTest"
 
+#define TOUCH D7
+#define TOUCHTIME 1000
 
 void callback(char* topic, byte* payload, unsigned int length);
 void reconnect();
+void touchISR();
+void touchDTISR_up();
+void touchDTISR_down();
+void touchAutomat();
 
 
+uint8_t flag_touchR = 0;
+uint8_t flag_touchF = 0;
+
+
+Ticker touchDimm;
 WiFiClient espClient;
 PubSubClient client(MQTT_IP,MQTT_PORT,callback,espClient);
 
@@ -22,6 +32,8 @@ PubSubClient client(MQTT_IP,MQTT_PORT,callback,espClient);
 void setup() {
         Serial.begin(115200);
         init_dimmer();
+        pinMode(TOUCH,INPUT);
+        attachInterrupt(digitalPinToInterrupt(TOUCH), touchISR, CHANGE);
         WiFi.mode(WIFI_STA);
         WiFi.begin(WIFI_SSID,WIFI_PASS);
         while (WiFi.status() != WL_CONNECTED) {
@@ -41,13 +53,9 @@ void loop() {
         }
         client.loop();
         dimmer();
+        touchAutomat();
 
-        //if(readings>=40) {
-        //Serial.print(" P: "); Serial.println(period,DEC);
-        //Serial.print(" duty: "); Serial.println(duty,DEC);
-        //Serial.print(" timer: "); Serial.println(tLow,DEC);
-        //readings = 0;
-        //}
+
 
 }
 
@@ -75,6 +83,80 @@ void reconnect() {
         }
 }
 
+void touchAutomat(){
+        static unsigned long touchT = 0;
+        static unsigned long betweenT = 0;
+        static int status = 0;
+
+        switch (status) {
+        case 0:
+                if(flag_touchR) {
+                        touchT = millis();
+                        status = 1;
+                }
+                break;
+        case 1:
+                if((touchT+TOUCHTIME)<=millis()) {
+                        status = 2;
+
+                }
+
+                if(flag_touchF) {
+                        if((touchT+TOUCHTIME)>=millis()) {
+                                status = 4;
+                                betweenT = millis();
+                                flag_touchR = 0;
+                                flag_touchF = 0;
+
+                        }
+                        break;
+                }
+                break;
+        case 2:
+                touchDimm.attach_ms(50, touchDTISR_up);
+                status = 3;
+                break;
+        case 3:
+                if(flag_touchF) {
+                        touchDimm.detach();
+                        flag_touchR = 0;
+                        flag_touchF = 0;
+                        status = 0;
+                }
+                break;
+        case 4:
+                if((betweenT + 500)<=millis()) {
+                        if(dimmer_status()) {
+                                dimmer_off();
+                        }else{
+                                dimmer_on();
+                        }
+                        status = 0;
+                        break;
+                }
+                if(flag_touchR) {
+                        status = 5;
+                }
+
+
+                break;
+        case 5:
+                touchDimm.attach_ms(50, touchDTISR_down);
+                status = 6;
+                break;
+        case 6:
+                if(flag_touchF) {
+                        touchDimm.detach();
+                        flag_touchR = 0;
+                        flag_touchF = 0;
+                        status = 0;
+                }
+                break;
+        }
+
+
+}
+
 
 void callback(char* topic, byte* payload, unsigned int length){
         int duty;
@@ -82,4 +164,21 @@ void callback(char* topic, byte* payload, unsigned int length){
         snprintf(buffer,length+1,"%s",payload);
         duty = atoi(buffer);
         dimmer_move(duty);
+}
+
+void touchISR(){
+        if(flag_touchR) {
+                flag_touchF = 1;
+        }else{
+                flag_touchR = 1;
+                flag_touchF = 0;
+        }
+
+}
+
+void touchDTISR_down(){
+        dimmer_down();
+}
+void touchDTISR_up(){
+        dimmer_up();
 }

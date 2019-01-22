@@ -1,8 +1,10 @@
 #ifndef ACDIMMER_H_
 #define ACDIMMER_H_
 
+
 #include <Arduino.h>
 #include <Ticker.h>
+
 
 #define TRUE 1
 #define FALSE 1
@@ -20,6 +22,7 @@ void dimmer_on();
 void dimmer_off();
 void dimmer();
 int dimmer_status();
+int dimmer_getDuty();
 void dimmer_up();
 void dimmer_down();
 

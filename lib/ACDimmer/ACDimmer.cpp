@@ -199,6 +199,10 @@ void dimmer_down(){
         dimmer_set(duty_save-1);
 }
 
+int dimmer_getDuty(){
+        return duty_save;
+}
+
 void initPeriod(){
         flag_ini = 1;
 }

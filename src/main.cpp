@@ -6,8 +6,9 @@
 #include <PubSubClient.h>
 #include <Arduino.h>
 #include "ACDimmer.h"
-#include "config.h"
 #include "touchAutomat.h"
+#include "config.h"
+
 
 
 #define TOUCH D7
@@ -16,14 +17,20 @@ void callback(char* topic, byte* payload, unsigned int length);
 void reconnect();
 void MQTTKeepTrack();
 void MQTTpubISR();
+void httpServer_ini();
+void finishedStartUp(int speed);
 
-
+const char* host = "esp8266-";
+const char* update_path = "/firmware";
+const char* update_username = USERNAME;
+const char* update_password = PASSWORD;
 
 uint8_t flag_MQTTpub = 0;
 int old_status = 0;
 int old_duty = 0;
 
-
+ESP8266HTTPUpdateServer httpUpdater;
+ESP8266WebServer httpServer(80);
 Ticker MQTTpub;
 WiFiClient espClient;
 PubSubClient client(MQTT_IP,MQTT_PORT,callback,espClient);
@@ -45,22 +52,74 @@ void setup() {
         Serial.print("Connected, IP address: ");
         Serial.println(WiFi.localIP());
 
+        httpServer_ini();
+
         MQTTpub.attach(2.0, MQTTpubISR);
+
 }
 
 void loop() {
         if (!client.connected()) {
                 reconnect();
         }
+        finishedStartUp(800);
         client.loop();
+        httpServer.handleClient();
         dimmer();
         touchAutomat();
         if(flag_MQTTpub) {
                 MQTTKeepTrack();
                 flag_MQTTpub = 0;
         }
+        MDNS.update();
 
 
+}
+
+void finishedStartUp(int speed){
+        static int state = 0;
+        static int count = 0;
+        static int stop = 0;
+        static unsigned long time = 0;
+        if(!stop) {
+                switch (state) {
+                case 0:
+                        dimmer_move(50, speed);
+                        time = millis();
+                        state++;
+                        break;
+                case 1:
+                        if((time + speed)<=millis()) state++;
+                        break;
+                case 2:
+                        dimmer_move(20, speed);
+                        time = millis();
+                        state++;
+                        break;
+                case 3:
+                        if((time + speed)<=millis()) {
+                                state = 0;
+                                if(count) {
+                                        stop++;
+                                        state = -1;
+                                }
+                                count++;
+                        }
+                        break;
+                }
+        }
+
+}
+
+void httpServer_ini(){
+        char buffer[100];
+        sprintf(buffer,"%s%s",host,DEVICE_NAME);
+        MDNS.begin(buffer);
+        httpUpdater.setup(&httpServer, update_path, update_username, update_password);
+        httpServer.begin();
+        MDNS.addService("http", "tcp", 80);
+        Serial.printf("HTTPUpdateServer ready! Open http://%s.local%s in your browser and login with username '%s' and password '%s'\n", buffer, update_path, update_username, update_password);
+        //------
 }
 
 void reconnect() {

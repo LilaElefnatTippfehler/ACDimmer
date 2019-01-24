@@ -6,30 +6,31 @@
 #include <PubSubClient.h>
 #include <Arduino.h>
 #include "ACDimmer.h"
+#include "touchAutomat.h"
 #include "config.h"
 
 
+
 #define TOUCH D7
-#define TOUCHTIME 1000
 
 void callback(char* topic, byte* payload, unsigned int length);
 void reconnect();
-void touchISR();
-void touchDTISR_up();
-void touchDTISR_down();
-void touchAutomat();
 void MQTTKeepTrack();
 void MQTTpubISR();
+void httpServer_ini();
+void finishedStartUp(int speed);
 
+const char* host = "esp8266-";
+const char* update_path = "/firmware";
+const char* update_username = USERNAME;
+const char* update_password = PASSWORD;
 
-uint8_t flag_touchR = 0;
-uint8_t flag_touchF = 0;
 uint8_t flag_MQTTpub = 0;
 int old_status = 0;
 int old_duty = 0;
 
-
-Ticker touchDimm;
+ESP8266HTTPUpdateServer httpUpdater;
+ESP8266WebServer httpServer(80);
 Ticker MQTTpub;
 WiFiClient espClient;
 PubSubClient client(MQTT_IP,MQTT_PORT,callback,espClient);
@@ -51,22 +52,74 @@ void setup() {
         Serial.print("Connected, IP address: ");
         Serial.println(WiFi.localIP());
 
+        httpServer_ini();
+
         MQTTpub.attach(2.0, MQTTpubISR);
+
 }
 
 void loop() {
         if (!client.connected()) {
                 reconnect();
         }
+        finishedStartUp(800);
         client.loop();
+        httpServer.handleClient();
         dimmer();
         touchAutomat();
         if(flag_MQTTpub) {
                 MQTTKeepTrack();
                 flag_MQTTpub = 0;
         }
+        MDNS.update();
 
 
+}
+
+void finishedStartUp(int speed){
+        static int state = 0;
+        static int count = 0;
+        static int stop = 0;
+        static unsigned long time = 0;
+        if(!stop) {
+                switch (state) {
+                case 0:
+                        dimmer_move(50, speed);
+                        time = millis();
+                        state++;
+                        break;
+                case 1:
+                        if((time + speed)<=millis()) state++;
+                        break;
+                case 2:
+                        dimmer_move(20, speed);
+                        time = millis();
+                        state++;
+                        break;
+                case 3:
+                        if((time + speed)<=millis()) {
+                                state = 0;
+                                if(count) {
+                                        stop++;
+                                        state = -1;
+                                }
+                                count++;
+                        }
+                        break;
+                }
+        }
+
+}
+
+void httpServer_ini(){
+        char buffer[100];
+        sprintf(buffer,"%s%s",host,DEVICE_NAME);
+        MDNS.begin(buffer);
+        httpUpdater.setup(&httpServer, update_path, update_username, update_password);
+        httpServer.begin();
+        MDNS.addService("http", "tcp", 80);
+        Serial.printf("HTTPUpdateServer ready! Open http://%s.local%s in your browser and login with username '%s' and password '%s'\n", buffer, update_path, update_username, update_password);
+        //------
 }
 
 void reconnect() {
@@ -97,91 +150,7 @@ void reconnect() {
         }
 }
 
-void touchAutomat(){
-        static unsigned long touchT = 0;
-        static unsigned long betweenT = 0;
-        static int status = 0;
 
-        switch (status) {
-        case 0:
-                if(flag_touchR) {
-                        touchT = millis();
-                        status = 1;
-                }
-                break;
-        case 1:
-                if((touchT+TOUCHTIME)<=millis()) {
-                        status = 2;
-
-                }
-
-                if(flag_touchF) {
-                        if((touchT+TOUCHTIME)>=millis()) {
-                                status = 4;
-                                betweenT = millis();
-                                flag_touchR = 0;
-                                flag_touchF = 0;
-
-                        }
-                        break;
-                }
-                break;
-        case 2:
-                touchDimm.attach_ms(50, touchDTISR_up);
-                status = 3;
-                touchT = 0;
-                break;
-        case 3:
-                if(flag_touchF) {
-                        if((touchT + 1000)>= millis() && touchT) {
-                                touchDimm.detach();
-                                flag_touchR = 0;
-                                flag_touchF = 0;
-                                status = 0;
-                                //Serial.println("Touch losgelassen");
-                        }
-                        touchT = millis();
-                        flag_touchF = 0;
-                }
-                break;
-        case 4:
-                if((betweenT + 500)<=millis()) {
-                        if(dimmer_status()) {
-                                dimmer_off();
-                        }else{
-                                dimmer_on();
-                        }
-                        status = 0;
-                        break;
-                }
-                if(flag_touchR) {
-                        status = 5;
-                }
-
-
-                break;
-        case 5:
-                touchDimm.attach_ms(50, touchDTISR_down);
-                status = 6;
-                touchT = 0;
-                break;
-        case 6:
-                if(flag_touchF) {
-                        if((touchT + 1000)>= millis() && touchT) {
-                                touchDimm.detach();
-                                flag_touchR = 0;
-                                flag_touchF = 0;
-                                status = 0;
-                                //Serial.println("Touch losgelassen");
-                        }
-                        touchT = millis();
-                        flag_touchF = 0;
-                }
-                break;
-        }
-
-
-}
 
 void MQTTKeepTrack(){
         if(client.connected()) {
@@ -277,22 +246,4 @@ void callback(char* topic, byte* payload, unsigned int length){
 
 void MQTTpubISR(){
         flag_MQTTpub = 1;
-}
-
-void touchISR(){
-        if(flag_touchR) {
-                flag_touchF = 1;
-                flag_touchR = 0;
-        }else{
-                flag_touchR = 1;
-                flag_touchF = 0;
-        }
-
-}
-
-void touchDTISR_down(){
-        dimmer_down();
-}
-void touchDTISR_up(){
-        dimmer_up();
 }

@@ -10,7 +10,6 @@
 #include "config.h"
 
 
-
 #define TOUCH D7
 
 void callback(char* topic, byte* payload, unsigned int length);
@@ -19,6 +18,15 @@ void MQTTKeepTrack();
 void MQTTpubISR();
 void httpServer_ini();
 void finishedStartUp(int speed);
+
+//---------Voice Commands Key Words--------
+const String On[]= {"ein","an","auf"};
+const uint8_t numOn = 3;
+const String Off[] = {"aus","ab"};
+const uint8_t numOff = 2;
+const String perc[] = {"auf","zu"};
+const uint8_t numPerc = 2;
+
 
 const char* host = "esp8266-";
 const char* update_path = "/firmware";
@@ -186,33 +194,55 @@ void callback(char* topic, byte* payload, unsigned int length){
                 snprintf(buffer,length+1,"%s",payload);                           //ein
                 String data = String(buffer);                                     //aus
                 Serial.print("Payload: "); Serial.println(data);
-                if(!data.compareTo("ein")) {
-                        dimmer_on();
-                        return;
-                }
-                if(!data.compareTo("aus")) {
-                        dimmer_off();
-                        return;
-                }
-                if(data.startsWith(DEVICE_NAME)) {
-                        if(data.indexOf("ein") != -1) {
+                uint8_t i = 0;
+                while(i<numOn) {
+                        if(!data.compareTo(On[i])) {
+                                Serial.println("dimmer on");
                                 dimmer_on();
                                 return;
                         }
-                        if(data.indexOf("aus") != -1) {
+                        i++;
+                }
+                i=0;
+                while(i<numOff) {
+                        if(!data.compareTo(Off[i])) {
+                                Serial.println("dimmer off");
                                 dimmer_off();
                                 return;
                         }
-                        int index = 0;
-                        if((index = data.indexOf("auf ")) != -1) {
-                                char number[4];
-                                int duty;
-                                for(int i=0; i<=4; i++) {
-                                        number[i] = buffer[index+4+i];
+                }
+
+                if(data.startsWith(DEVICE_NAME)) {
+                        uint8_t i = 0;
+                        while(i<numOn) {
+                                if(data.endsWith(On[i])!= -1) {
+                                        Serial.println("devicename dimmer on");
+                                        dimmer_on();
+                                        return;
                                 }
-                                duty = atoi(number);
-                                dimmer_move(duty);
+                                i++;
                         }
+                        i=0;
+                        while(i<numOff) {
+                                if(data.endsWith(Off[i])!= -1) {
+                                        Serial.println("devicename dimmer off");
+                                        dimmer_off();
+                                        return;
+                                }
+                        }
+                        i=0;
+                        data.remove(0,strlen(DEVICE_NAME));
+                        while(i<numPerc) {
+                                if(data.startsWith(perc[i]) != -1) {
+                                        Serial.println("devicename dimmer perc");
+                                        data.remove(0,perc[i].length());
+                                        int duty;
+                                        duty = atoi(perc[i].c_str());
+                                        dimmer_move(duty);
+                                }
+                                i++;
+                        }
+
                 }
                 return;
         }

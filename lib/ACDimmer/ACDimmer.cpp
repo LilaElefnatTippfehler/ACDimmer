@@ -172,23 +172,17 @@ void dimmer(){
                 if(duty_goal == duty_save) tick.detach();
 
         }
+        if(duty_save <= 10) {
+                status = 0;
+        }
+        if(duty_save >= 11) {
+                status = 1;
+        }
 
 }
 
 int dimmer_status(){
-        if(status == 1) {
-                return 1;
-        }
-        if(status == 0) {
-                return 0;
-        }
-        if(duty_save >= 11) {
-                return 1;
-        }
-        if(duty_save <= 10) {
-                return 0;
-        }
-        return -1;
+        return status;
 }
 
 void dimmer_up(){

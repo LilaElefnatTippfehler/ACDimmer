@@ -31,6 +31,7 @@
 #include <ESP8266HTTPClient.h>
 #include <PubSubClient.h>
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include "ACDimmer.h"
 #include "touchAutomat.h"
 #include "config.h"
@@ -44,6 +45,8 @@ void MQTTKeepTrack();
 void MQTTpubISR();
 void httpServer_ini();
 void finishedStartUp(int speed);
+void timeISR();
+void funWithFlags();
 
 //---------Voice Commands Key Words--------
 const String On[]= {"ein","an","auf"};
@@ -58,13 +61,16 @@ const char* update_path = "/firmware";
 const char* update_username = USERNAME;
 const char* update_password = PASSWORD;
 
-uint8_t flag_MQTTpub = 0;
+volatile uint8_t flag_time = 0;
+volatile uint8_t flag_MQTTpub = 0;
 int old_status = 0;
 int old_duty = 0;
+unsigned long timeOn = 0;
 
 ESP8266HTTPUpdateServer httpUpdater;
 ESP8266WebServer httpServer(80);
 Ticker MQTTpub;
+Ticker checkTime;
 WiFiClient espClient;
 PubSubClient client(MQTT_IP,MQTT_PORT,callback,espClient);
 
@@ -87,7 +93,8 @@ void setup() {
 
         httpServer_ini();
 
-        MQTTpub.attach(2.0, MQTTpubISR);
+        MQTTpub.attach(1.0, MQTTpubISR);
+        checkTime.attach(1.0,timeISR);
 
 }
 
@@ -100,10 +107,8 @@ void loop() {
         httpServer.handleClient();
         dimmer();
         touchAutomat();
-        if(flag_MQTTpub) {
-                MQTTKeepTrack();
-                flag_MQTTpub = 0;
-        }
+        funWithFlags();
+
         MDNS.update();
 
 
@@ -188,28 +193,65 @@ void reconnect() {
 
 
 void MQTTKeepTrack(){
+        static int last_val = 0;
         if(client.connected()) {
+                if(last_val != dimmer_getDuty()) {
+                        last_val = dimmer_getDuty();
+                        return;
+                }
                 if(old_status != dimmer_status()||old_duty != dimmer_getDuty()) {
-                        const char* dd = ":"; const char* koma = ",";
-                        const char* ko = "{"; const char* kc = "}";
-                        const char* Smil = "\"millis\"";
-                        const char* Sperc = "\"percentage\"";
-                        const char* Sstatus = "\"status\"";
-                        long milli = millis();
+                        const int capacity = JSON_OBJECT_SIZE(3);
+                        StaticJsonBuffer<capacity> jb;
+                        JsonObject& root = jb.createObject();
+                        const int capacityT = JSON_OBJECT_SIZE(3);
+                        StaticJsonBuffer<capacityT> jbT;
+                        JsonObject& time = jbT.createObject();
                         old_status = dimmer_status();
                         old_duty = dimmer_getDuty();
-                        String millis = String(milli,DEC);
-                        String status = String(old_status,DEC);
-                        String percent = String(old_duty,DEC);
-                        String jsonString = String(ko)+Smil+dd+millis+koma+Sstatus+dd+status+koma+Sperc+dd+percent+kc;
+                        time["hours"].set(timeOn/1000/60/60);
+                        time["minutes"].set(timeOn/1000/60%60);
+                        time["seconds"].set(timeOn/1000%60);
+
+                        root["percentage"].set(old_duty);
+                        root["status"].set(old_status);
+                        root["On time"].set(time);
                         String topic = "/" + String(DEVICE_NAME);
                         char* buffer = (char*) malloc(topic.length()+1);
                         topic.toCharArray(buffer, topic.length()+1);
-                        uint8_t* buffer2 = (uint8_t*) malloc(jsonString.length()+1);
-                        jsonString.getBytes(buffer2, jsonString.length()+1);
-                        client.publish(buffer, buffer2, jsonString.length()+1);
+                        String output;
+                        root.printTo(output);
+                        uint8_t* buffer2 = (uint8_t*) malloc(output.length()+1);
+                        output.getBytes(buffer2, output.length()+1);
+                        client.publish(buffer, buffer2,output.length()+1);
 
                 }
+        }
+}
+
+void funWithFlags(){
+        if(flag_MQTTpub) {
+                MQTTKeepTrack();
+                flag_MQTTpub = 0;
+        }
+        if(flag_time) {
+                static unsigned long turnedOn = 0;
+                static int lastStatus = 0;
+                if(lastStatus == dimmer_status()) {
+                        lastStatus = dimmer_status();
+                        if(dimmer_status() == 1) {
+                                timeOn += millis() - turnedOn;
+                                turnedOn = millis();
+                        }
+                } else{
+                        if(dimmer_status() == 1) {
+                                turnedOn = millis();
+                        }else{
+                                timeOn += millis() - turnedOn;
+                        }
+                        lastStatus = dimmer_status();
+                }
+                flag_time = 0;
+
         }
 }
 
@@ -301,4 +343,8 @@ void callback(char* topic, byte* payload, unsigned int length){
 
 void MQTTpubISR(){
         flag_MQTTpub = 1;
+}
+
+void timeISR(){
+        flag_time = 1;
 }

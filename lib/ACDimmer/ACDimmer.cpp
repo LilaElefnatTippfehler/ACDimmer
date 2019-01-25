@@ -38,6 +38,7 @@ void init_dimmer(){
         while(!getPeriod()) {
                 dimmer();
         }
+        //period = EXPPERIOD;       //Just for debugging
         detachInterrupt(digitalPinToInterrupt(ZC));
         attachInterrupt(digitalPinToInterrupt(ZC), zeroCross, FALLING);
 

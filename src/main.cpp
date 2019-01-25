@@ -141,6 +141,7 @@ void finishedStartUp(int speed){
                         break;
                 }
         }
+        dimmer_off();
 
 }
 
@@ -187,25 +188,25 @@ void reconnect() {
 
 void MQTTKeepTrack(){
         if(client.connected()) {
-                if(old_status != dimmer_status()) {
-                        char buffer[100];
-                        sprintf(buffer,"%s%s%s","/",DEVICE_NAME,"/status");
+                if(old_status != dimmer_status()||old_duty != dimmer_getDuty()) {
+                        const char* dd = ":"; const char* koma = ",";
+                        const char* ko = "{"; const char* kc = "}";
+                        const char* Smil = "\"millis\"";
+                        const char* Sperc = "\"percentage\"";
+                        const char* Sstatus = "\"status\"";
+                        long milli = millis();
                         old_status = dimmer_status();
-                        if(old_status == 0) {
-                                client.publish(buffer, "aus");
-                        }
-                        if(old_status == 1) {
-                                client.publish(buffer, "ein");
-                        }
-
-                }
-                if(old_duty != dimmer_getDuty()) {
-                        char buffer[100];
-                        char payload[10];
                         old_duty = dimmer_getDuty();
-                        sprintf(payload,"%i",old_duty);
-                        sprintf(buffer,"%s%s%s","/",DEVICE_NAME,"/pwm");
-                        client.publish(buffer, payload);
+                        String millis = String(milli,DEC);
+                        String status = String(old_status,DEC);
+                        String percent = String(old_duty,DEC);
+                        String jsonString = String(ko)+Smil+dd+millis+koma+Sstatus+dd+status+koma+Sperc+dd+percent+kc;
+                        String topic = "/" + String(DEVICE_NAME);
+                        char* buffer = (char*) malloc(topic.length()+1);
+                        topic.toCharArray(buffer, topic.length()+1);
+                        uint8_t* buffer2 = (uint8_t*) malloc(jsonString.length()+1);
+                        jsonString.getBytes(buffer2, jsonString.length()+1);
+                        client.publish(buffer, buffer2, jsonString.length()+1);
 
                 }
         }
@@ -274,11 +275,11 @@ void callback(char* topic, byte* payload, unsigned int length){
         if(!strcmp(buffer,topic)) {
                 char buffer[10];
                 snprintf(buffer,length+1,"%s",payload);
-                if(!strcmp(buffer,"ein")) {
+                if(!strcmp(buffer,"1")) {
                         dimmer_on();
                         return;
                 }
-                if(!strcmp(buffer,"aus")) {
+                if(!strcmp(buffer,"0")) {
                         dimmer_off();
                         return;
                 }

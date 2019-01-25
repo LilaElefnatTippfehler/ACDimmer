@@ -1,3 +1,29 @@
+
+/*
+   Device is connected to MQTT Server.
+   MQTT Topic structure I used is:
+   /lampen/DEVICE_NAME/
+                   /status    Gets turn on/off commands from here (from other clients)
+                   /pwm       Gets the level of brightness from here 0-100
+
+   /lampen/ada       Bridged AdafruitIO feed here. Commands come from Google Assistant via IFTTT
+
+   /DEVICE_NAME      In these topics every device publishes its status/brightness/sensors/whatever
+
+   Commands look like this:
+   IFTT_ACTIVATION_STRING KEYWORD                        This one turns on/off all lamps that subscibed to /ada/lampen
+   KEYWORD out of On[] or Off[]
+
+   IFTT_ACTIVATION_STRING DEVICE_NAME KEYWORD            This turns on only the device with the name DEVICE_NAME.
+   KEYWORD out of On[] or Off[]                          KEYWORD must be the first and last word after DEVICE_NAME
+
+   IFTT_ACTIVATION_STRING DEVICE_NAME KEYWORD NUMBER     Dimming the lamp to NUMBER percent. everything after NUMBER will be ignored
+   KEYWORD out of perc[]     NUMBER 0-100
+
+   if there is the same word in On[]/Off[] and perc[] the last command wont work if it is said as first word after DEVICE_NAME
+   and as last word of the command.
+ */
+
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
@@ -26,7 +52,6 @@ const String Off[] = {"aus","ab"};
 const uint8_t numOff = 2;
 const String perc[] = {"auf","zu"};
 const uint8_t numPerc = 2;
-
 
 const char* host = "esp8266-";
 const char* update_path = "/firmware";
@@ -197,7 +222,6 @@ void callback(char* topic, byte* payload, unsigned int length){
                 uint8_t i = 0;
                 while(i<numOn) {
                         if(!data.compareTo(On[i])) {
-                                Serial.println("dimmer on");
                                 dimmer_on();
                                 return;
                         }
@@ -206,17 +230,18 @@ void callback(char* topic, byte* payload, unsigned int length){
                 i=0;
                 while(i<numOff) {
                         if(!data.compareTo(Off[i])) {
-                                Serial.println("dimmer off");
                                 dimmer_off();
                                 return;
                         }
+                        i++;
                 }
 
                 if(data.startsWith(DEVICE_NAME)) {
+                        data.remove(0,strlen(DEVICE_NAME));
+                        data.trim();
                         uint8_t i = 0;
                         while(i<numOn) {
-                                if(data.endsWith(On[i])!= -1) {
-                                        Serial.println("devicename dimmer on");
+                                if(data.endsWith(On[i])&&data.startsWith(On[i])) {
                                         dimmer_on();
                                         return;
                                 }
@@ -224,20 +249,18 @@ void callback(char* topic, byte* payload, unsigned int length){
                         }
                         i=0;
                         while(i<numOff) {
-                                if(data.endsWith(Off[i])!= -1) {
-                                        Serial.println("devicename dimmer off");
+                                if(data.endsWith(Off[i])&&data.startsWith(Off[i])) {
                                         dimmer_off();
                                         return;
                                 }
+                                i++;
                         }
                         i=0;
-                        data.remove(0,strlen(DEVICE_NAME));
                         while(i<numPerc) {
-                                if(data.startsWith(perc[i]) != -1) {
-                                        Serial.println("devicename dimmer perc");
+                                if(data.startsWith(perc[i])) {
                                         data.remove(0,perc[i].length());
                                         int duty;
-                                        duty = atoi(perc[i].c_str());
+                                        duty = data.toInt();
                                         dimmer_move(duty);
                                 }
                                 i++;

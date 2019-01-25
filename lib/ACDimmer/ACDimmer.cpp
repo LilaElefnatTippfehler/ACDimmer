@@ -83,11 +83,13 @@ void dimmer_set(int duty){
 }
 
 void dimmer_on(){
-        if(duty_old <= 10) {
+        if(duty_old <= 20) {
                 dimmer_move(100);
+        }else{
+                dimmer_move(duty_old);
         }
         status = 1;
-        dimmer_move(duty_old);
+
 }
 
 void dimmer_off(){

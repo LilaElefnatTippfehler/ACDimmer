@@ -135,13 +135,14 @@ void finishedStartUp(int speed){
                                 if(count) {
                                         stop++;
                                         state = -1;
+                                        dimmer_off();
                                 }
                                 count++;
                         }
                         break;
                 }
         }
-        dimmer_off();
+
 
 }
 

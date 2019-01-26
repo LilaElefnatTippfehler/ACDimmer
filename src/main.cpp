@@ -47,6 +47,7 @@ void httpServer_ini();
 void finishedStartUp(int speed);
 void timeISR();
 void funWithFlags();
+void shedPubISR();
 
 //---------Voice Commands Key Words--------
 const String On[]= {"ein","an","auf"};
@@ -63,6 +64,7 @@ const char* update_password = PASSWORD;
 
 volatile uint8_t flag_time = 0;
 volatile uint8_t flag_MQTTpub = 0;
+volatile uint8_t flag_ShedPub = 0;
 int old_status = 0;
 int old_duty = 0;
 unsigned long timeOn = 0;
@@ -71,6 +73,7 @@ ESP8266HTTPUpdateServer httpUpdater;
 ESP8266WebServer httpServer(80);
 Ticker MQTTpub;
 Ticker checkTime;
+Ticker ShedPub;
 WiFiClient espClient;
 PubSubClient client(MQTT_IP,MQTT_PORT,callback,espClient);
 
@@ -95,6 +98,7 @@ void setup() {
 
         MQTTpub.attach(1.0, MQTTpubISR);
         checkTime.attach(1.0,timeISR);
+        ShedPub.attach(60.0,shedPubISR);
 
 }
 
@@ -199,7 +203,7 @@ void MQTTKeepTrack(){
                         last_val = dimmer_getDuty();
                         return;
                 }
-                if(old_status != dimmer_status()||old_duty != dimmer_getDuty()) {
+                if(old_status != dimmer_status()||old_duty != dimmer_getDuty()||flag_ShedPub) {
                         const int capacity = JSON_OBJECT_SIZE(3);
                         StaticJsonBuffer<capacity> jb;
                         JsonObject& root = jb.createObject();
@@ -232,6 +236,7 @@ void funWithFlags(){
         if(flag_MQTTpub) {
                 MQTTKeepTrack();
                 flag_MQTTpub = 0;
+                flag_ShedPub = 0;
         }
         if(flag_time) {
                 static unsigned long turnedOn = 0;
@@ -347,4 +352,8 @@ void MQTTpubISR(){
 
 void timeISR(){
         flag_time = 1;
+}
+
+void shedPubISR(){
+        flag_ShedPub = 1;
 }

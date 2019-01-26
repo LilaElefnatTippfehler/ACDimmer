@@ -1,3 +1,29 @@
+
+/*
+   Device is connected to MQTT Server.
+   MQTT Topic structure I used is:
+   /lampen/DEVICE_NAME/
+                   /status    Gets turn on/off commands from here (from other clients)
+                   /pwm       Gets the level of brightness from here 0-100
+
+   /lampen/ada       Bridged AdafruitIO feed here. Commands come from Google Assistant via IFTTT
+
+   /DEVICE_NAME      In these topics every device publishes its status/brightness/sensors/whatever
+
+   Commands look like this:
+   IFTT_ACTIVATION_STRING KEYWORD                        This one turns on/off all lamps that subscibed to /ada/lampen
+   KEYWORD out of On[] or Off[]
+
+   IFTT_ACTIVATION_STRING DEVICE_NAME KEYWORD            This turns on only the device with the name DEVICE_NAME.
+   KEYWORD out of On[] or Off[]                          KEYWORD must be the first and last word after DEVICE_NAME
+
+   IFTT_ACTIVATION_STRING DEVICE_NAME KEYWORD NUMBER     Dimming the lamp to NUMBER percent. everything after NUMBER will be ignored
+   KEYWORD out of perc[]     NUMBER 0-100
+
+   if there is the same word in On[]/Off[] and perc[] the last command wont work if it is said as first word after DEVICE_NAME
+   and as last word of the command.
+ */
+
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
@@ -5,10 +31,10 @@
 #include <ESP8266HTTPClient.h>
 #include <PubSubClient.h>
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include "ACDimmer.h"
 #include "touchAutomat.h"
 #include "config.h"
-
 
 
 #define TOUCH D7
@@ -19,19 +45,35 @@ void MQTTKeepTrack();
 void MQTTpubISR();
 void httpServer_ini();
 void finishedStartUp(int speed);
+void timeISR();
+void funWithFlags();
+void shedPubISR();
+
+//---------Voice Commands Key Words--------
+const String On[]= {"ein","an","auf"};
+const uint8_t numOn = 3;
+const String Off[] = {"aus","ab"};
+const uint8_t numOff = 2;
+const String perc[] = {"auf","zu"};
+const uint8_t numPerc = 2;
 
 const char* host = "esp8266-";
 const char* update_path = "/firmware";
 const char* update_username = USERNAME;
 const char* update_password = PASSWORD;
 
-uint8_t flag_MQTTpub = 0;
+volatile uint8_t flag_time = 0;
+volatile uint8_t flag_MQTTpub = 0;
+volatile uint8_t flag_ShedPub = 0;
 int old_status = 0;
 int old_duty = 0;
+unsigned long timeOn = 0;
 
 ESP8266HTTPUpdateServer httpUpdater;
 ESP8266WebServer httpServer(80);
 Ticker MQTTpub;
+Ticker checkTime;
+Ticker ShedPub;
 WiFiClient espClient;
 PubSubClient client(MQTT_IP,MQTT_PORT,callback,espClient);
 
@@ -54,7 +96,9 @@ void setup() {
 
         httpServer_ini();
 
-        MQTTpub.attach(2.0, MQTTpubISR);
+        MQTTpub.attach(1.0, MQTTpubISR);
+        checkTime.attach(1.0,timeISR);
+        ShedPub.attach(60.0,shedPubISR);
 
 }
 
@@ -67,10 +111,8 @@ void loop() {
         httpServer.handleClient();
         dimmer();
         touchAutomat();
-        if(flag_MQTTpub) {
-                MQTTKeepTrack();
-                flag_MQTTpub = 0;
-        }
+        funWithFlags();
+
         MDNS.update();
 
 
@@ -102,12 +144,14 @@ void finishedStartUp(int speed){
                                 if(count) {
                                         stop++;
                                         state = -1;
+                                        dimmer_off();
                                 }
                                 count++;
                         }
                         break;
                 }
         }
+
 
 }
 
@@ -122,11 +166,11 @@ void httpServer_ini(){
         //------
 }
 
+
 void reconnect() {
         // Loop until we're reconnected
         while (!client.connected()) {
                 Serial.print("Attempting MQTT connection...");
-                // Create a random client ID
                 String clientId = "ESP8266Client-";
                 clientId += DEVICE_NAME;
                 // Attempt to connect
@@ -135,10 +179,12 @@ void reconnect() {
                         Serial.print(clientId.c_str()), Serial.println("");
                         char buffer[100];
                         sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/status");
-                        client.subscribe(buffer);
+                        client.subscribe(buffer,1);
                         sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/pwm");
-                        client.subscribe(buffer);
-                        client.subscribe("/lampen/ada");
+                        client.subscribe(buffer,1);
+                        sprintf(buffer,"%s%s","/",DEVICE_NAME);
+                        client.subscribe(buffer,1);
+                        client.subscribe("/lampen/ada",1);
 
                 } else {
                         Serial.print("failed, rc=");
@@ -153,28 +199,66 @@ void reconnect() {
 
 
 void MQTTKeepTrack(){
+        static int last_val = 0;
         if(client.connected()) {
-                if(old_status != dimmer_status()) {
-                        char buffer[100];
-                        sprintf(buffer,"%s%s%s","/",DEVICE_NAME,"/status");
+                if(last_val != dimmer_getDuty()) {
+                        last_val = dimmer_getDuty();
+                        return;
+                }
+                if(old_status != dimmer_status()||old_duty != dimmer_getDuty()||flag_ShedPub) {
+                        const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
+                        StaticJsonBuffer<capacity> jb;
+                        JsonObject& root = jb.createObject();
+                        const int capacityT = JSON_OBJECT_SIZE(3);
+                        StaticJsonBuffer<capacityT> jbT;
+                        JsonObject& time = jbT.createObject();
                         old_status = dimmer_status();
-                        if(old_status == 0) {
-                                client.publish(buffer, "aus");
-                        }
-                        if(old_status == 1) {
-                                client.publish(buffer, "ein");
-                        }
-
-                }
-                if(old_duty != dimmer_getDuty()) {
-                        char buffer[100];
-                        char payload[10];
                         old_duty = dimmer_getDuty();
-                        sprintf(payload,"%i",old_duty);
-                        sprintf(buffer,"%s%s%s","/",DEVICE_NAME,"/pwm");
-                        client.publish(buffer, payload);
+                        time["hours"].set(timeOn/1000/60/60);
+                        time["minutes"].set(timeOn/1000/60%60);
+                        time["seconds"].set(timeOn/1000%60);
+
+                        root["percentage"].set(old_duty);
+                        root["status"].set(old_status);
+                        root["On time"].set(time);
+                        String topic = "/" + String(DEVICE_NAME);
+                        char* buffer = (char*) malloc(topic.length()+1);
+                        topic.toCharArray(buffer, topic.length()+1);
+                        String output;
+                        root.printTo(output);
+                        uint8_t* buffer2 = (uint8_t*) malloc(output.length()+1);
+                        output.getBytes(buffer2, output.length()+1);
+                        client.publish(buffer, buffer2,output.length()+1,true);
 
                 }
+        }
+}
+
+void funWithFlags(){
+        if(flag_MQTTpub) {
+                MQTTKeepTrack();
+                flag_MQTTpub = 0;
+                flag_ShedPub = 0;
+        }
+        if(flag_time) {
+                static unsigned long turnedOn = 0;
+                static int lastStatus = 0;
+                if(lastStatus == dimmer_status()) {
+                        lastStatus = dimmer_status();
+                        if(dimmer_status() == 1) {
+                                timeOn += millis() - turnedOn;
+                                turnedOn = millis();
+                        }
+                } else{
+                        if(dimmer_status() == 1) {
+                                turnedOn = millis();
+                        }else{
+                                timeOn += millis() - turnedOn;
+                        }
+                        lastStatus = dimmer_status();
+                }
+                flag_time = 0;
+
         }
 }
 
@@ -186,33 +270,53 @@ void callback(char* topic, byte* payload, unsigned int length){
                 snprintf(buffer,length+1,"%s",payload);                           //ein
                 String data = String(buffer);                                     //aus
                 Serial.print("Payload: "); Serial.println(data);
-                if(!data.compareTo("ein")) {
-                        dimmer_on();
-                        return;
-                }
-                if(!data.compareTo("aus")) {
-                        dimmer_off();
-                        return;
-                }
-                if(data.startsWith(DEVICE_NAME)) {
-                        if(data.indexOf("ein") != -1) {
+                uint8_t i = 0;
+                while(i<numOn) {
+                        if(!data.compareTo(On[i])) {
                                 dimmer_on();
                                 return;
                         }
-                        if(data.indexOf("aus") != -1) {
+                        i++;
+                }
+                i=0;
+                while(i<numOff) {
+                        if(!data.compareTo(Off[i])) {
                                 dimmer_off();
                                 return;
                         }
-                        int index = 0;
-                        if((index = data.indexOf("auf ")) != -1) {
-                                char number[4];
-                                int duty;
-                                for(int i=0; i<=4; i++) {
-                                        number[i] = buffer[index+4+i];
+                        i++;
+                }
+
+                if(data.startsWith(DEVICE_NAME)) {
+                        data.remove(0,strlen(DEVICE_NAME));
+                        data.trim();
+                        uint8_t i = 0;
+                        while(i<numOn) {
+                                if(data.endsWith(On[i])&&data.startsWith(On[i])) {
+                                        dimmer_on();
+                                        return;
                                 }
-                                duty = atoi(number);
-                                dimmer_move(duty);
+                                i++;
                         }
+                        i=0;
+                        while(i<numOff) {
+                                if(data.endsWith(Off[i])&&data.startsWith(Off[i])) {
+                                        dimmer_off();
+                                        return;
+                                }
+                                i++;
+                        }
+                        i=0;
+                        while(i<numPerc) {
+                                if(data.startsWith(perc[i])) {
+                                        data.remove(0,perc[i].length());
+                                        int duty;
+                                        duty = data.toInt();
+                                        dimmer_move(duty);
+                                }
+                                i++;
+                        }
+
                 }
                 return;
         }
@@ -221,11 +325,11 @@ void callback(char* topic, byte* payload, unsigned int length){
         if(!strcmp(buffer,topic)) {
                 char buffer[10];
                 snprintf(buffer,length+1,"%s",payload);
-                if(!strcmp(buffer,"ein")) {
+                if(!strcmp(buffer,"1")) {
                         dimmer_on();
                         return;
                 }
-                if(!strcmp(buffer,"aus")) {
+                if(!strcmp(buffer,"0")) {
                         dimmer_off();
                         return;
                 }
@@ -238,7 +342,24 @@ void callback(char* topic, byte* payload, unsigned int length){
                 duty = atoi(buffer);
                 dimmer_move(duty);
         }
+        sprintf(buffer,"%s%s","/",DEVICE_NAME);
+        if(!strcmp(buffer,topic)) {
+                const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
+                StaticJsonBuffer<capacity> jb;
+                JsonObject& msg = jb.parseObject(payload);
+                if(msg.success()) {
+                        auto time = msg["On time"];
+                        auto hours = time["hours"].as<unsigned long>();
+                        auto minutes = time["minutes"].as<unsigned long>();
+                        auto seconds = time["seconds"].as<unsigned long>();
+                        timeOn += (seconds+ minutes * 60 + hours * 60 * 60) * 1000;
+                        Serial.println(hours); Serial.println(minutes); Serial.println(seconds); Serial.println("");
+                }else{
+                        Serial.print("Couldnt parse Json Object from: "); Serial.println(topic);
+                }
 
+                client.unsubscribe(buffer);
+        }
 
 
 
@@ -246,4 +367,12 @@ void callback(char* topic, byte* payload, unsigned int length){
 
 void MQTTpubISR(){
         flag_MQTTpub = 1;
+}
+
+void timeISR(){
+        flag_time = 1;
+}
+
+void shedPubISR(){
+        flag_ShedPub = 1;
 }

@@ -48,8 +48,7 @@ void touchAutomat(){
                                 status = 0;
                                 //Serial.println("Touch losgelassen");
                         }
-                        touchT = millis();
-                        flag_touchF = 0;
+                        if(touchT==0) touchT = millis();
                 }
                 break;
         case 4:
@@ -82,8 +81,7 @@ void touchAutomat(){
                                 status = 0;
                                 //Serial.println("Touch losgelassen");
                         }
-                        touchT = millis();
-                        flag_touchF = 0;
+                        if(touchT==0) touchT = millis();
                 }
                 break;
         }

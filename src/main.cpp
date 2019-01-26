@@ -166,11 +166,11 @@ void httpServer_ini(){
         //------
 }
 
+
 void reconnect() {
         // Loop until we're reconnected
         while (!client.connected()) {
                 Serial.print("Attempting MQTT connection...");
-                // Create a random client ID
                 String clientId = "ESP8266Client-";
                 clientId += DEVICE_NAME;
                 // Attempt to connect
@@ -179,10 +179,12 @@ void reconnect() {
                         Serial.print(clientId.c_str()), Serial.println("");
                         char buffer[100];
                         sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/status");
-                        client.subscribe(buffer);
+                        client.subscribe(buffer,1);
                         sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/pwm");
-                        client.subscribe(buffer);
-                        client.subscribe("/lampen/ada");
+                        client.subscribe(buffer,1);
+                        sprintf(buffer,"%s%s","/",DEVICE_NAME);
+                        client.subscribe(buffer,1);
+                        client.subscribe("/lampen/ada",1);
 
                 } else {
                         Serial.print("failed, rc=");
@@ -204,7 +206,7 @@ void MQTTKeepTrack(){
                         return;
                 }
                 if(old_status != dimmer_status()||old_duty != dimmer_getDuty()||flag_ShedPub) {
-                        const int capacity = JSON_OBJECT_SIZE(3);
+                        const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
                         StaticJsonBuffer<capacity> jb;
                         JsonObject& root = jb.createObject();
                         const int capacityT = JSON_OBJECT_SIZE(3);
@@ -226,7 +228,7 @@ void MQTTKeepTrack(){
                         root.printTo(output);
                         uint8_t* buffer2 = (uint8_t*) malloc(output.length()+1);
                         output.getBytes(buffer2, output.length()+1);
-                        client.publish(buffer, buffer2,output.length()+1);
+                        client.publish(buffer, buffer2,output.length()+1,true);
 
                 }
         }
@@ -340,7 +342,24 @@ void callback(char* topic, byte* payload, unsigned int length){
                 duty = atoi(buffer);
                 dimmer_move(duty);
         }
+        sprintf(buffer,"%s%s","/",DEVICE_NAME);
+        if(!strcmp(buffer,topic)) {
+                const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
+                StaticJsonBuffer<capacity> jb;
+                JsonObject& msg = jb.parseObject(payload);
+                if(msg.success()) {
+                        auto time = msg["On time"];
+                        auto hours = time["hours"].as<unsigned long>();
+                        auto minutes = time["minutes"].as<unsigned long>();
+                        auto seconds = time["seconds"].as<unsigned long>();
+                        timeOn += (seconds+ minutes * 60 + hours * 60 * 60) * 1000;
+                        Serial.println(hours); Serial.println(minutes); Serial.println(seconds); Serial.println("");
+                }else{
+                        Serial.print("Couldnt parse Json Object from: "); Serial.println(topic);
+                }
 
+                client.unsubscribe(buffer);
+        }
 
 
 

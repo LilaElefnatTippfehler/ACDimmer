@@ -1,12 +1,15 @@
 
 /*
+   YOU'LL NEED TO CHANGE MQTT_MAX_PACKET_SIZE IN PubSubClient.h to 512!
+ #define MQTT_MAX_PACKET_SIZE 512
+
    Device is connected to MQTT Server.
    MQTT Topic structure I used is:
    /lampen/DEVICE_NAME/
                    /status    Gets turn on/off commands from here (from other clients)
                    /pwm       Gets the level of brightness from here 0-100
 
-   /lampen/ada       Bridged AdafruitIO feed here. Commands come from Google Assistant via IFTTT
+   /lampen/ada/json  Bridged AdafruitIO feed here. Commands come from Google Assistant via IFTTT
 
    /DEVICE_NAME      In these topics every device publishes its status/brightness/sensors/whatever
 
@@ -233,6 +236,8 @@ void MQTTKeepTrack(){
                         uint8_t* buffer2 = (uint8_t*) malloc(output.length()+1);
                         output.getBytes(buffer2, output.length()+1);
                         client.publish(buffer, buffer2,output.length()+1,true);
+                        free(buffer);
+                        free(buffer2);
 
                 }
         }

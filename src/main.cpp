@@ -75,6 +75,7 @@ int old_duty = 0;
 unsigned long timeOn = 0;
 unsigned long lastReconnectAttempt = 0;
 String ClientID;
+unsigned long cycleTime = 0;
 
 ESP8266HTTPUpdateServer httpUpdater;
 ESP8266WebServer httpServer(80);
@@ -104,11 +105,18 @@ void setup() {
         httpServer_ini();
 
         MQTTpub.attach(1.0, MQTTpubISR);
-        checkTime.attach(1.0,timeISR);
+        checkTime.attach(30.0,timeISR);
         ShedPub.attach(60.0,shedPubISR);
 
         String ClientID = String(CLIENTID) + DEVICE_NAME;
-
+        dimmer_move(50, 800);
+        delay(800);
+        dimmer_move(20,800);
+        delay(800);
+        dimmer_move(50, 800);
+        delay(800);
+        dimmer_move(20,800);
+        delay(800);
 }
 
 void loop() {
@@ -123,10 +131,9 @@ void loop() {
                 }
 
         }
-        finishedStartUp(800);
         client.loop();
         httpServer.handleClient();
-        dimmer();
+        //dimmer();
         touchAutomat();
         funWithFlags();
 
@@ -213,6 +220,7 @@ void MQTTKeepTrack(){
                         return;
                 }
                 if(old_status != dimmer_status()||old_duty != dimmer_getDuty()||flag_ShedPub) {
+                        flag_time = 1;
                         const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
                         StaticJsonBuffer<capacity> jb;
                         JsonObject& root = jb.createObject();

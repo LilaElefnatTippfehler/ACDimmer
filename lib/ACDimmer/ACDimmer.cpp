@@ -79,7 +79,7 @@ void dimmer_set(int duty){
         duty_save = duty;
         if(duty >= 100) duty_save = 100;
         if(duty <= 0) duty_save = 0;
-        updateTime(duty);
+        updateTime(duty_save);
 }
 
 void dimmer_on(){
@@ -154,17 +154,8 @@ void dimmer(){
                 readings++;
                 flag_ini = 0;
         }
-        if(flag_ZC) {
-                timer1_write(tLow*5);
-                flag_ZC = 0;
-        }
-        if(flag_timer1) {
-                digitalWrite(PWM, HIGH);
-                delayMicroseconds(12);
-                digitalWrite(PWM, LOW);
-                flag_timer1 = 0;
-        }
         if(flag_ticker == 1) {
+                Serial.println("in dimmer move");
                 if(direction == 0) {
                         dimmer_set(duty_save-1);
                 }
@@ -173,18 +164,30 @@ void dimmer(){
                 }
                 flag_ticker = 0;
                 if(duty_goal == duty_save) tick.detach();
-
         }
+
+
+}
+
+boolean dimmer_ismoving(){
+        Serial.print("duty_goal: "); Serial.println(duty_goal);
+        Serial.print("duty_save: "); Serial.println(duty_save);
+        if(duty_goal == duty_save) {
+                Serial.println("false");
+                return false;
+        }else{
+                Serial.println("true");
+                return true;
+        }
+}
+
+int dimmer_status(){
         if(duty_save <= 10) {
                 status = 0;
         }
         if(duty_save >= 11) {
                 status = 1;
         }
-
-}
-
-int dimmer_status(){
         return status;
 }
 
@@ -205,14 +208,22 @@ void initPeriod(){
 }
 
 void zeroCross(){
+        timer1_write(tLow*5);
         flag_ZC = 1;
 
 }
 void tickHandler(){
-        //Serial.println("in ISR ");
         flag_ticker = 1;
 }
 
 void handlerTimer(){
-        flag_timer1 = 1;
+        if(flag_timer1) {
+                digitalWrite(PWM, LOW);
+                flag_timer1 = 0;
+        }else{
+                digitalWrite(PWM, HIGH);
+                timer1_write(15*5);
+                flag_timer1 = 1;
+        }
+
 }

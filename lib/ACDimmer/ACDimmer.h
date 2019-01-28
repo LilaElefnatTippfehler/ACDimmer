@@ -25,6 +25,7 @@ int dimmer_status();
 int dimmer_getDuty();
 void dimmer_up();
 void dimmer_down();
+boolean dimmer_ismoving();
 
 
 

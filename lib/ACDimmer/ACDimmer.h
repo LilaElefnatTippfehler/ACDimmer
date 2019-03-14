@@ -6,8 +6,6 @@
 #include <Ticker.h>
 
 
-#define TRUE 1
-#define FALSE 1
 #define EXPPERIOD 10000  //Expected Period
 #define ZC D5
 #define PWM D6
@@ -20,11 +18,11 @@ void dimmer_move(int duty);
 void dimmer_move(int duty, int time_ms);
 void dimmer_on();
 void dimmer_off();
-void dimmer();
 int dimmer_status();
 int dimmer_getDuty();
 void dimmer_up();
 void dimmer_down();
+boolean dimmer_ismoving();
 
 
 

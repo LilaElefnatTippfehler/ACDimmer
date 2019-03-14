@@ -7,10 +7,7 @@ void tickHandler();
 void initPeriod();
 void updateTime(int time);
 
-uint8_t flag_ZC = 0;
 uint8_t flag_timer1 = 0;
-uint8_t flag_ticker = 0;
-uint8_t flag_ini = 0;
 uint8_t status = 2;
 unsigned long lastZC = 0;
 unsigned long thisZC = 0;
@@ -35,9 +32,7 @@ void init_dimmer(){
         timer1_attachInterrupt(handlerTimer);
         timer1_enable(TIM_DIV16,TIM_EDGE,TIM_SINGLE);
         attachInterrupt(digitalPinToInterrupt(ZC), initPeriod, FALLING);
-        while(!getPeriod()) {
-                dimmer();
-        }
+        while(!getPeriod());
         //period = EXPPERIOD;       //Just for debugging
         detachInterrupt(digitalPinToInterrupt(ZC));
         attachInterrupt(digitalPinToInterrupt(ZC), zeroCross, FALLING);
@@ -79,7 +74,7 @@ void dimmer_set(int duty){
         duty_save = duty;
         if(duty >= 100) duty_save = 100;
         if(duty <= 0) duty_save = 0;
-        updateTime(duty);
+        updateTime(duty_save);
 }
 
 void dimmer_on(){
@@ -148,43 +143,26 @@ void dimmer_move(int duty, int time_ms){
         duty_goal = duty;
         tick.attach_ms(steps, tickHandler);
 }
-void dimmer(){
-        if(flag_ini) {
-                thisZC = micros();
-                readings++;
-                flag_ini = 0;
-        }
-        if(flag_ZC) {
-                timer1_write(tLow*5);
-                flag_ZC = 0;
-        }
-        if(flag_timer1) {
-                digitalWrite(PWM, HIGH);
-                delayMicroseconds(12);
-                digitalWrite(PWM, LOW);
-                flag_timer1 = 0;
-        }
-        if(flag_ticker == 1) {
-                if(direction == 0) {
-                        dimmer_set(duty_save-1);
-                }
-                if(direction == 1) {
-                        dimmer_set(duty_save+1);
-                }
-                flag_ticker = 0;
-                if(duty_goal == duty_save) tick.detach();
 
+boolean dimmer_ismoving(){
+        Serial.print("duty_goal: "); Serial.println(duty_goal);
+        Serial.print("duty_save: "); Serial.println(duty_save);
+        if(duty_goal == duty_save) {
+                Serial.println("false");
+                return false;
+        }else{
+                Serial.println("true");
+                return true;
         }
+}
+
+int dimmer_status(){
         if(duty_save <= 10) {
                 status = 0;
         }
         if(duty_save >= 11) {
                 status = 1;
         }
-
-}
-
-int dimmer_status(){
         return status;
 }
 
@@ -201,18 +179,32 @@ int dimmer_getDuty(){
 }
 
 void initPeriod(){
-        flag_ini = 1;
+        thisZC = micros();
+        readings++;
 }
 
 void zeroCross(){
-        flag_ZC = 1;
+        timer1_write(tLow*5);
 
 }
 void tickHandler(){
-        //Serial.println("in ISR ");
-        flag_ticker = 1;
+        if(direction == 0) {
+                dimmer_set(duty_save-1);
+        }
+        if(direction == 1) {
+                dimmer_set(duty_save+1);
+        }
+        if(duty_goal == duty_save) tick.detach();
 }
 
 void handlerTimer(){
-        flag_timer1 = 1;
+        if(flag_timer1) {
+                digitalWrite(PWM, LOW);
+                flag_timer1 = 0;
+        }else{
+                digitalWrite(PWM, HIGH);
+                timer1_write(15*5);
+                flag_timer1 = 1;
+        }
+
 }

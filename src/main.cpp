@@ -1,12 +1,15 @@
 
 /*
+   YOU'LL NEED TO CHANGE MQTT_MAX_PACKET_SIZE IN PubSubClient.h to 512!
+ #define MQTT_MAX_PACKET_SIZE 512
+
    Device is connected to MQTT Server.
    MQTT Topic structure I used is:
    /lampen/DEVICE_NAME/
                    /status    Gets turn on/off commands from here (from other clients)
                    /pwm       Gets the level of brightness from here 0-100
 
-   /lampen/ada       Bridged AdafruitIO feed here. Commands come from Google Assistant via IFTTT
+   /lampen/ada/json  Bridged AdafruitIO feed here. Commands come from Google Assistant via IFTTT
 
    /DEVICE_NAME      In these topics every device publishes its status/brightness/sensors/whatever
 
@@ -24,6 +27,7 @@
    and as last word of the command.
  */
 
+
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
@@ -38,9 +42,10 @@
 
 
 #define TOUCH D7
+#define CLIENTID "ESP8266Client-"
 
 void callback(char* topic, byte* payload, unsigned int length);
-void reconnect();
+boolean reconnect();
 void MQTTKeepTrack();
 void MQTTpubISR();
 void httpServer_ini();
@@ -68,6 +73,9 @@ volatile uint8_t flag_ShedPub = 0;
 int old_status = 0;
 int old_duty = 0;
 unsigned long timeOn = 0;
+unsigned long lastReconnectAttempt = 0;
+String ClientID;
+unsigned long cycleTime = 0;
 
 ESP8266HTTPUpdateServer httpUpdater;
 ESP8266WebServer httpServer(80);
@@ -97,19 +105,35 @@ void setup() {
         httpServer_ini();
 
         MQTTpub.attach(1.0, MQTTpubISR);
-        checkTime.attach(1.0,timeISR);
+        checkTime.attach(30.0,timeISR);
         ShedPub.attach(60.0,shedPubISR);
 
+        String ClientID = String(CLIENTID) + DEVICE_NAME;
+        dimmer_move(50, 800);
+        delay(800);
+        dimmer_move(20,800);
+        delay(800);
+        dimmer_move(50, 800);
+        delay(800);
+        dimmer_move(20,800);
+        delay(800);
 }
 
 void loop() {
         if (!client.connected()) {
-                reconnect();
+                unsigned long now = millis();
+                if (now - lastReconnectAttempt > 5000) {
+                        lastReconnectAttempt = now;
+                        // Attempt to reconnect
+                        if (reconnect()) {
+                                lastReconnectAttempt = 0;
+                        }
+                }
+
         }
-        finishedStartUp(800);
         client.loop();
         httpServer.handleClient();
-        dimmer();
+        //dimmer();
         touchAutomat();
         funWithFlags();
 
@@ -167,33 +191,23 @@ void httpServer_ini(){
 }
 
 
-void reconnect() {
+boolean reconnect() {
         // Loop until we're reconnected
-        while (!client.connected()) {
-                Serial.print("Attempting MQTT connection...");
-                String clientId = "ESP8266Client-";
-                clientId += DEVICE_NAME;
-                // Attempt to connect
-                if (client.connect(clientId.c_str(),MQTT_USR,MQTT_PW)) {
-                        Serial.print("connected as ");
-                        Serial.print(clientId.c_str()), Serial.println("");
-                        char buffer[100];
-                        sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/status");
-                        client.subscribe(buffer,1);
-                        sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/pwm");
-                        client.subscribe(buffer,1);
-                        sprintf(buffer,"%s%s","/",DEVICE_NAME);
-                        client.subscribe(buffer,1);
-                        client.subscribe("/lampen/ada",1);
-
-                } else {
-                        Serial.print("failed, rc=");
-                        Serial.print(client.state());
-                        Serial.println(" try again in 5 seconds");
-                        // Wait 5 seconds before retrying
-                        delay(5000);
-                }
+        if (client.connect(ClientID.c_str(),MQTT_USR,MQTT_PW)) {
+                char buffer[100];
+                sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/status");
+                client.subscribe(buffer,1);
+                sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/pwm");
+                client.subscribe(buffer,1);
+                sprintf(buffer,"%s%s","/",DEVICE_NAME);
+                client.subscribe(buffer,1);
+                client.subscribe("/lampen/ada/json",1);
+        }else{
+                Serial.print("MQTT conncetion failed, rc=");
+                Serial.print(client.state());
+                Serial.println(" try again in 5 seconds");
         }
+        return client.connected();
 }
 
 
@@ -206,6 +220,7 @@ void MQTTKeepTrack(){
                         return;
                 }
                 if(old_status != dimmer_status()||old_duty != dimmer_getDuty()||flag_ShedPub) {
+                        flag_time = 1;
                         const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
                         StaticJsonBuffer<capacity> jb;
                         JsonObject& root = jb.createObject();
@@ -229,6 +244,8 @@ void MQTTKeepTrack(){
                         uint8_t* buffer2 = (uint8_t*) malloc(output.length()+1);
                         output.getBytes(buffer2, output.length()+1);
                         client.publish(buffer, buffer2,output.length()+1,true);
+                        free(buffer);
+                        free(buffer2);
 
                 }
         }
@@ -264,11 +281,19 @@ void funWithFlags(){
 
 
 void callback(char* topic, byte* payload, unsigned int length){
-        if(!strcmp("/lampen/ada",topic)) {                      //Possible commands:"NAME ein"
-                Serial.println("Adafruit Input");                                 //"NAME auf %"
-                char buffer[100];                                                 //"NAME aus"
-                snprintf(buffer,length+1,"%s",payload);                           //ein
-                String data = String(buffer);                                     //aus
+        if(!strcmp("/lampen/ada/json",topic)) {
+                const int capacity = 2*JSON_OBJECT_SIZE(4) + JSON_OBJECT_SIZE(5);
+                Serial.println("Adafruit Input");
+                StaticJsonBuffer<capacity> jb;
+                JsonObject& msg = jb.parseObject(payload);
+                String data;
+                if(msg.success()) {
+                        auto jsondata = msg["data"];
+                        const char* value = jsondata["value"];
+                        data = String(value);
+                }else{
+                        Serial.print("Couldnt parse Json Object from: "); Serial.println(topic);
+                }
                 Serial.print("Payload: "); Serial.println(data);
                 uint8_t i = 0;
                 while(i<numOn) {

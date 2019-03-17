@@ -187,25 +187,20 @@ void MQTTKeepTrack(){
                 if(old_status != dimmer_status()||old_duty != dimmer_getDuty()||flag_ShedPub) {
                         flag_time = 1;
                         const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
-                        StaticJsonBuffer<capacity> jb;
-                        JsonObject& root = jb.createObject();
-                        const int capacityT = JSON_OBJECT_SIZE(3);
-                        StaticJsonBuffer<capacityT> jbT;
-                        JsonObject& time = jbT.createObject();
+                        StaticJsonDocument<capacity> root; // New ArduinoJson 6 syntax
                         old_status = dimmer_status();
                         old_duty = dimmer_getDuty();
-                        time["hours"].set(timeOn/1000/60/60);
-                        time["minutes"].set(timeOn/1000/60%60);
-                        time["seconds"].set(timeOn/1000%60);
-
                         root["level"].set(old_duty);
                         root["status"].set(old_status);
-                        root["On time"].set(time);
+                        JsonObject time = root.createNestedObject("On time");
+                        time["hours"].set(timeOn / 1000 / 60 / 60);
+                        time["minutes"].set(timeOn / 1000 / 60 % 60);
+                        time["seconds"].set(timeOn / 1000 % 60);
                         String topic = "/" + String(DEVICE_NAME);
                         char* buffer = (char*) malloc(topic.length()+1);
                         topic.toCharArray(buffer, topic.length()+1);
-                        String output;
-                        root.printTo(output);
+                        String output = "";
+                        serializeJson(root, output); // New ArduinoJson 6 syntax
                         uint8_t* buffer2 = (uint8_t*) malloc(output.length()+1);
                         output.getBytes(buffer2, output.length()+1);
                         client.publish(buffer, buffer2,output.length()+1,true);
@@ -249,15 +244,18 @@ void callback(char* topic, byte* payload, unsigned int length){
         if(!strcmp("/lampen/ada/json",topic)) {
                 const int capacity = 2*JSON_OBJECT_SIZE(4) + JSON_OBJECT_SIZE(5);
                 Serial.println("Adafruit Input");
-                StaticJsonBuffer<capacity> jb;
-                JsonObject& msg = jb.parseObject(payload);
+                StaticJsonDocument<capacity> msg;
+                DeserializationError err = deserializeJson(msg, payload);
                 String data;
-                if(msg.success()) {
+                if(!err) {
                         auto jsondata = msg["data"];
                         const char* value = jsondata["value"];
                         data = String(value);
                 }else{
-                        Serial.print("Couldnt parse Json Object from: "); Serial.println(topic);
+                        Serial.print("Couldnt parse Json Object from: ");
+                        Serial.println(topic);
+                        Serial.print("Error: ");
+                        Serial.println(err.c_str());
                 }
                 Serial.print("Payload: "); Serial.println(data);
                 uint8_t i = 0;
@@ -335,9 +333,9 @@ void callback(char* topic, byte* payload, unsigned int length){
         sprintf(buffer,"%s%s","/",DEVICE_NAME);
         if(!strcmp(buffer,topic)) {
                 const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
-                StaticJsonBuffer<capacity> jb;
-                JsonObject& msg = jb.parseObject(payload);
-                if(msg.success()) {
+                StaticJsonDocument<capacity> msg;
+                DeserializationError err = deserializeJson(msg, payload);
+                if(!err) {
                         auto time = msg["On time"];
                         auto hours = time["hours"].as<unsigned long>();
                         auto minutes = time["minutes"].as<unsigned long>();
@@ -346,6 +344,8 @@ void callback(char* topic, byte* payload, unsigned int length){
                         Serial.println(hours); Serial.println(minutes); Serial.println(seconds); Serial.println("");
                 }else{
                         Serial.print("Couldnt parse Json Object from: "); Serial.println(topic);
+                        Serial.print("Error: ");
+                        Serial.println(err.c_str());
                 }
 
                 client.unsubscribe(buffer);

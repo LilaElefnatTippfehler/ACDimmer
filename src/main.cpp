@@ -23,12 +23,13 @@
    device with the name DEVICE_NAME. KEYWORD out of On[] or Off[] KEYWORD must be
    the first and last word after DEVICE_NAME
 
-   IFTT_ACTIVATION_STRING DEVICE_NAME KEYWORD NUMBER     Dimming the lamp to
-   NUMBER percent. everything after NUMBER will be ignored KEYWORD out of perc[]
-   NUMBER 0-100
 
-   if there is the same word in On[]/Off[] and perc[] the last command wont work
-   if it is said as first word after DEVICE_NAME and as last word of the command.
+   IFTT_ACTIVATION_STRING DEVICE_NAME KEYWORD NUMBER     Dimming the lamp to NUMBER percent. everything after NUMBER will be ignored
+   KEYWORD out of lvl[]     NUMBER 0-100
+
+   if there is the same word in On[]/Off[] and lvl[] the last command wont work if it is said as first word after DEVICE_NAME
+   and as last word of the command.
+
  */
 
 #include "ACDimmer.h"
@@ -63,8 +64,10 @@ const String On[] = {"ein", "an", "auf"};
 const uint8_t numOn = 3;
 const String Off[] = {"aus", "ab"};
 const uint8_t numOff = 2;
-const String perc[] = {"auf", "zu"};
-const uint8_t numPerc = 2;
+
+const String lvl[] = {"auf","zu"};
+const uint8_t numLvl = 2;
+
 
 const char *host = "esp8266-";
 const char *update_path = "/firmware";
@@ -92,8 +95,10 @@ PubSubClient client(MQTT_IP, MQTT_PORT, callback, espClient);
 void setup() {
         Serial.begin(115200);
         init_dimmer();
+
         LSinit();
         pinMode(TOUCH, INPUT);
+
         attachInterrupt(digitalPinToInterrupt(TOUCH), touchISR, CHANGE);
         WiFi.mode(WIFI_STA);
         WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -122,6 +127,7 @@ void setup() {
         delay(800);
         dimmer_move(20, 800);
         delay(800);
+        dimmer_set(0);
 }
 
 void loop() {
@@ -149,41 +155,7 @@ void LSinit() {
         analogWrite(LS, 0);
 }
 
-void finishedStartUp(int speed) {
-        static int state = 0;
-        static int count = 0;
-        static int stop = 0;
-        static unsigned long time = 0;
-        if (!stop) {
-                switch (state) {
-                case 0:
-                        dimmer_move(50, speed);
-                        time = millis();
-                        state++;
-                        break;
-                case 1:
-                        if ((time + speed) <= millis())
-                                state++;
-                        break;
-                case 2:
-                        dimmer_move(20, speed);
-                        time = millis();
-                        state++;
-                        break;
-                case 3:
-                        if ((time + speed) <= millis()) {
-                                state = 0;
-                                if (count) {
-                                        stop++;
-                                        state = -1;
-                                        dimmer_off();
-                                }
-                                count++;
-                        }
-                        break;
-                }
-        }
-}
+
 
 void httpServer_ini() {
         char buffer[100];
@@ -226,11 +198,13 @@ void MQTTKeepTrack() {
                 }
                 if (old_status != dimmer_status() || old_duty != dimmer_getDuty() || flag_ShedPub) {
                         flag_time = 1;
-                        const int capacity = JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(3);
+
+                        const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
                         StaticJsonDocument<capacity> root; // New ArduinoJson 6 syntax
                         old_status = dimmer_status();
                         old_duty = dimmer_getDuty();
-                        root["percentage"].set(old_duty);
+                        root["level"].set(old_duty);
+
                         root["status"].set(old_status);
                         JsonObject time = root.createNestedObject("On time");
                         time["hours"].set(timeOn / 1000 / 60 / 60);
@@ -238,13 +212,14 @@ void MQTTKeepTrack() {
                         time["seconds"].set(timeOn / 1000 % 60);
 
                         String topic = "/" + String(DEVICE_NAME);
-                        char *buffer = (char *)malloc(topic.length() + 1);
-                        topic.toCharArray(buffer, topic.length() + 1);
+                        char* buffer = (char*) malloc(topic.length()+1);
+                        topic.toCharArray(buffer, topic.length()+1);
                         String output = "";
                         serializeJson(root, output); // New ArduinoJson 6 syntax
-                        uint8_t *buffer2 = (uint8_t *)malloc(output.length() + 1);
-                        output.getBytes(buffer2, output.length() + 1);
-                        client.publish(buffer, buffer2, output.length() + 1, true);
+                        uint8_t* buffer2 = (uint8_t*) malloc(output.length()+1);
+                        output.getBytes(buffer2, output.length()+1);
+                        client.publish(buffer, buffer2,output.length()+1,true);
+
                         free(buffer);
                         free(buffer2);
                 }
@@ -285,13 +260,17 @@ void callback(char *topic, byte *payload, unsigned int length) {
                 StaticJsonDocument<capacity> msg;
                 DeserializationError err = deserializeJson(msg, payload);
                 String data;
-                if (!err) {
+                if(!err) {
+
                         auto jsondata = msg["data"];
                         const char *value = jsondata["value"];
                         data = String(value);
-                } else {
+                }else{
                         Serial.print("Couldnt parse Json Object from: ");
                         Serial.println(topic);
+                        Serial.print("Error: ");
+                        Serial.println(err.c_str());
+
                 }
                 Serial.print("Payload: ");
                 Serial.println(data);
@@ -331,10 +310,11 @@ void callback(char *topic, byte *payload, unsigned int length) {
                                 }
                                 i++;
                         }
-                        i = 0;
-                        while (i < numPerc) {
-                                if (data.startsWith(perc[i])) {
-                                        data.remove(0, perc[i].length());
+                        i=0;
+                        while(i<numLvl) {
+                                if(data.startsWith(lvl[i])) {
+                                        data.remove(0,lvl[i].length());
+
                                         int duty;
                                         duty = data.toInt();
                                         dimmer_move(duty);
@@ -366,25 +346,22 @@ void callback(char *topic, byte *payload, unsigned int length) {
                 duty = atoi(buffer);
                 dimmer_move(duty);
         }
-        sprintf(buffer, "%s%s", "/", DEVICE_NAME);
-        if (!strcmp(buffer, topic)) {
-                const int capacity = JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(3);
+        sprintf(buffer,"%s%s","/",DEVICE_NAME);
+        if(!strcmp(buffer,topic)) {
+                const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
                 StaticJsonDocument<capacity> msg;
                 DeserializationError err = deserializeJson(msg, payload);
-                // JsonObject msg = jb.parseObject(payload);
-                if (!err) {
+                if(!err) {
                         auto time = msg["On time"];
                         auto hours = time["hours"].as<unsigned long>();
                         auto minutes = time["minutes"].as<unsigned long>();
                         auto seconds = time["seconds"].as<unsigned long>();
-                        timeOn += (seconds + minutes * 60 + hours * 60 * 60) * 1000;
-                        Serial.println(hours);
-                        Serial.println(minutes);
-                        Serial.println(seconds);
-                        Serial.println("");
-                } else {
-                        Serial.print("Couldnt parse Json Object from: ");
-                        Serial.println(topic);
+                        timeOn += (seconds+ minutes * 60 + hours * 60 * 60) * 1000;
+                        Serial.println(hours); Serial.println(minutes); Serial.println(seconds); Serial.println("");
+                }else{
+                        Serial.print("Couldnt parse Json Object from: "); Serial.println(topic);
+                        Serial.print("Error: ");
+                        Serial.println(err.c_str());
                 }
 
                 client.unsubscribe(buffer);

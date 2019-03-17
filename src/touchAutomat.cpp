@@ -13,18 +13,22 @@ void touchAutomat(){
         switch (status) {
         case 0:
                 if(flag_touchR) {
+                        Serial.println("DEBUG: case0 Touch");
                         touchT = millis();
                         status = 1;
                 }
                 break;
         case 1:
+                Serial.println("DEBUG: case1 waiting for release 1");
                 if((touchT+TOUCHTIME)<=millis()) {
+                        Serial.println("DEBUG: case1 timeout");
                         status = 2;
 
                 }
 
                 if(flag_touchF) {
                         if((touchT+TOUCHTIME)>=millis()) {
+                                Serial.println("DEBUG: case1 next touch");
                                 status = 4;
                                 betweenT = millis();
                                 flag_touchR = 0;
@@ -35,24 +39,28 @@ void touchAutomat(){
                 }
                 break;
         case 2:
+                Serial.println("DEBUG: case2 attach Ticker UP");
                 touchDimm.attach_ms(50, touchDTISR_up);
                 status = 3;
                 touchT = 0;
                 break;
         case 3:
+                Serial.println("DEBUG: case3 waiting for release");
                 if(flag_touchF) {
                         if((touchT + 1000)>= millis() && touchT) {
+                                Serial.println("DEBUG: case3 touch released");
                                 touchDimm.detach();
                                 flag_touchR = 0;
                                 flag_touchF = 0;
                                 status = 0;
-                                //Serial.println("Touch losgelassen");
                         }
                         if(touchT==0) touchT = millis();
                 }
                 break;
         case 4:
+                Serial.println("DEBUG: case4 waiting for second touch");
                 if((betweenT + 500)<=millis()) {
+                        Serial.println("DEBUG: case4 timeout");
                         if(dimmer_status()) {
                                 dimmer_off();
                         }else{
@@ -62,19 +70,23 @@ void touchAutomat(){
                         break;
                 }
                 if(flag_touchR) {
+                        Serial.println("DEBUG: case4 second touch");
                         status = 5;
                 }
 
 
                 break;
         case 5:
+                Serial.println("DEBUG: case5 attach Ticker down");
                 touchDimm.attach_ms(50, touchDTISR_down);
                 status = 6;
                 touchT = 0;
                 break;
         case 6:
                 if(flag_touchF) {
+                        Serial.println("DEBUG: case6 waiting for release");
                         if((touchT + 1000)>= millis() && touchT) {
+                                Serial.println("DEBUG: case6 touch released");
                                 touchDimm.detach();
                                 flag_touchR = 0;
                                 flag_touchF = 0;

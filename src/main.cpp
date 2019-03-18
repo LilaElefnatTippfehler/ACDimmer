@@ -33,6 +33,7 @@
  */
 
 #include "ACDimmer.h"
+#include "LEDString.h"
 #include "config.h"
 #include "touchAutomat.h"
 #include <Arduino.h>
@@ -56,8 +57,7 @@ void finishedStartUp(int speed);
 void timeISR();
 void funWithFlags();
 void shedPubISR();
-void LSinit();
-void LSmove(int duty, int time_ms);
+void changeLvl(String cmd, int duty = 0, int time = 0);
 
 //---------Voice Commands Key Words--------
 const String On[] = {"ein", "an", "auf"};
@@ -94,9 +94,11 @@ PubSubClient client(MQTT_IP, MQTT_PORT, callback, espClient);
 
 void setup() {
         Serial.begin(115200);
+
+
+        init_ledStr();
         init_dimmer();
 
-        LSinit();
         pinMode(TOUCH, INPUT);
 
         attachInterrupt(digitalPinToInterrupt(TOUCH), touchISR, CHANGE);
@@ -119,15 +121,15 @@ void setup() {
         ShedPub.attach(60.0, shedPubISR);
 
         String ClientID = String(CLIENTID) + DEVICE_NAME;
-        dimmer_move(50, 800);
+        changeLvl("move_ms",50, 800);
         delay(800);
-        dimmer_move(20, 800);
+        changeLvl("move_ms",20, 800);
         delay(800);
-        dimmer_move(50, 800);
+        changeLvl("move_ms",50, 800);
         delay(800);
-        dimmer_move(20, 800);
+        changeLvl("move_ms",20, 800);
         delay(800);
-        dimmer_set(0);
+        changeLvl("set",0);
 }
 
 void loop() {
@@ -149,13 +151,6 @@ void loop() {
 
         MDNS.update();
 }
-
-void LSinit() {
-        pinMode(LS, OUTPUT);
-        analogWrite(LS, 0);
-}
-
-
 
 void httpServer_ini() {
         char buffer[100];
@@ -277,7 +272,7 @@ void callback(char *topic, byte *payload, unsigned int length) {
                 uint8_t i = 0;
                 while (i < numOn) {
                         if (!data.compareTo(On[i])) {
-                                dimmer_on();
+                                changeLvl("on");
                                 return;
                         }
                         i++;
@@ -285,7 +280,7 @@ void callback(char *topic, byte *payload, unsigned int length) {
                 i = 0;
                 while (i < numOff) {
                         if (!data.compareTo(Off[i])) {
-                                dimmer_off();
+                                changeLvl("off");
                                 return;
                         }
                         i++;
@@ -297,7 +292,7 @@ void callback(char *topic, byte *payload, unsigned int length) {
                         uint8_t i = 0;
                         while (i < numOn) {
                                 if (data.endsWith(On[i]) && data.startsWith(On[i])) {
-                                        dimmer_on();
+                                        changeLvl("on");
                                         return;
                                 }
                                 i++;
@@ -305,7 +300,7 @@ void callback(char *topic, byte *payload, unsigned int length) {
                         i = 0;
                         while (i < numOff) {
                                 if (data.endsWith(Off[i]) && data.startsWith(Off[i])) {
-                                        dimmer_off();
+                                        changeLvl("off");
                                         return;
                                 }
                                 i++;
@@ -317,7 +312,7 @@ void callback(char *topic, byte *payload, unsigned int length) {
 
                                         int duty;
                                         duty = data.toInt();
-                                        dimmer_move(duty);
+                                        changeLvl("move",duty);
                                 }
                                 i++;
                         }
@@ -330,11 +325,11 @@ void callback(char *topic, byte *payload, unsigned int length) {
                 char buffer[10];
                 snprintf(buffer, length + 1, "%s", payload);
                 if (!strcmp(buffer, "1")) {
-                        dimmer_on();
+                        changeLvl("on");
                         return;
                 }
                 if (!strcmp(buffer, "0")) {
-                        dimmer_off();
+                        changeLvl("off");
                         return;
                 }
         }
@@ -344,7 +339,7 @@ void callback(char *topic, byte *payload, unsigned int length) {
                 char buffer[10];
                 snprintf(buffer, length + 1, "%s", payload);
                 duty = atoi(buffer);
-                dimmer_move(duty);
+                changeLvl("move",duty);
         }
         sprintf(buffer,"%s%s","/",DEVICE_NAME);
         if(!strcmp(buffer,topic)) {
@@ -365,6 +360,25 @@ void callback(char *topic, byte *payload, unsigned int length) {
                 }
 
                 client.unsubscribe(buffer);
+        }
+}
+
+void changeLvl(String cmd,int duty, int time){
+        if(!cmd.compareTo("move")) {
+                dimmer_move(duty);
+                ledStr_move(duty);
+        }else if(!cmd.compareTo("move_ms")) {
+                dimmer_move(duty,time);
+                ledStr_move(duty,time);
+        }else if(!cmd.compareTo("set")) {
+                dimmer_set(duty);
+                ledStr_set(duty);
+        }else if(!cmd.compareTo("on")) {
+                dimmer_on();
+                ledStr_on();
+        }else if(!cmd.compareTo("off")) {
+                dimmer_off();
+                ledStr_off();
         }
 }
 

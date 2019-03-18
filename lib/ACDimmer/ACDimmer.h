@@ -9,12 +9,11 @@
 #define PWM D6
 #define PERIODBUFFER 300
 #define DIMMSPEED 1000
-#define LS D2
+
 
 void init_dimmer();
 void dimmer_set(int duty);
-void dimmer_move(int duty);
-void dimmer_move(int duty, int time_ms);
+void dimmer_move(int duty, int time_ms = DIMMSPEED);
 void dimmer_on();
 void dimmer_off();
 int dimmer_status();

@@ -33,7 +33,7 @@
  */
 
 #include "ACDimmer.h"
-#include "LEDString.h"
+#include "LEDStringcpp.hpp"
 #include "config.h"
 #include "touchAutomat.h"
 #include <Arduino.h>
@@ -91,14 +91,16 @@ Ticker checkTime;
 Ticker ShedPub;
 WiFiClient espClient;
 PubSubClient client(MQTT_IP, MQTT_PORT, callback, espClient);
+LEDString lamps(D1);
 
 void setup() {
         Serial.begin(115200);
 
 
-        init_ledStr();
-        init_dimmer();
+        //init_ledStr();
 
+        init_dimmer();
+        lamps.init();
         pinMode(TOUCH, INPUT);
 
         attachInterrupt(digitalPinToInterrupt(TOUCH), touchISR, CHANGE);
@@ -366,19 +368,19 @@ void callback(char *topic, byte *payload, unsigned int length) {
 void changeLvl(String cmd,int duty, int time){
         if(!cmd.compareTo("move")) {
                 dimmer_move(duty);
-                ledStr_move(duty);
+                lamps.move(duty);
         }else if(!cmd.compareTo("move_ms")) {
                 dimmer_move(duty,time);
-                ledStr_move(duty,time);
+                lamps.move(duty,time);
         }else if(!cmd.compareTo("set")) {
                 dimmer_set(duty);
-                ledStr_set(duty);
+                lamps.set(duty);
         }else if(!cmd.compareTo("on")) {
                 dimmer_on();
-                ledStr_on();
+                lamps.on();
         }else if(!cmd.compareTo("off")) {
                 dimmer_off();
-                ledStr_off();
+                lamps.off();
         }
 }
 

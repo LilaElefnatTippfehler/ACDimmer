@@ -1,5 +1,5 @@
-#ifndef TOUCHAUTOMATCPP_HPP_
-#define TOUCHAUTOMATCPP_HPP_
+#ifndef TOUCHAUTOMAT_HPP_
+#define TOUCHAUTOMAT_HPP_
 
 #include <Arduino.h>
 #include <Ticker.h>

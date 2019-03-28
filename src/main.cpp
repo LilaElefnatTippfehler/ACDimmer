@@ -33,9 +33,9 @@
  */
 
 #include "ACDimmer.h"
-#include "LEDStringcpp.hpp"
+#include "LEDString.hpp"
 #include "config.h"
-#include "touchAutomatcpp.hpp"
+#include "touchAutomat.hpp"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESP8266HTTPClient.h>

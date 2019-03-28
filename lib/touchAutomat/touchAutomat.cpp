@@ -1,6 +1,6 @@
 #include <Ticker.h>
 #include <Arduino.h>
-#include "touchAutomatcpp.hpp"
+#include "touchAutomat.hpp"
 
 bool touchAutomat::instanceFlag = false;
 touchAutomat* touchAutomat::single = NULL;

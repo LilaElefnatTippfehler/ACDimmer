@@ -1,138 +1,113 @@
-#include "LEDstring.h"
 
-namespace LEDSTRING
-{
-void tickHandlerLEDStr();
-void wurstPWMHandler(uint8_t state);
-void wurstPWM(int duty);
+#include "LEDString.hpp"
 
-const uint32_t period = 5000; // * 200ns ^= 1 kHz
-uint32 io_info[PWM_CHANNELS][3] = {{PERIPHS_IO_MUX_GPIO5_U, FUNC_GPIO5, 5}};
-int duty_save = 0;
-int duty_goal = 0;
-int duty_old = 0;
-int direction = -1;
-unsigned long steps = 0;
-uint8_t status = 2;
 
-Ticker tick;
-Ticker wurstPWMever;
+LEDString::LEDString(uint8_t LEDPin){
+        Pin = LEDPin;
 }
 
-
-void init_ledStr() {
-        pinMode(LS, OUTPUT);
-        /*uint32 pwm_duty_init[PWM_CHANNELS] = {0};
-           pwm_init(LEDSTRING::period, pwm_duty_init, PWM_CHANNELS, LEDSTRING::io_info);
-           pwm_start();
-           analogWrite(LS, 0);*/
-        LEDSTRING::wurstPWMever.once_ms(10, LEDSTRING::wurstPWMHandler, (uint8_t) 1);
+void LEDString::init(){
+        pinMode(Pin,OUTPUT);
+        wurstPWMever.once_ms(10, LEDSTRING::wurstPWMHandler, this);
 }
 
-
-void ledStr_set(int duty) {
-        LEDSTRING::duty_save = duty;
-        if (duty >= 10)
-                LEDSTRING::duty_save = 10;
-        if (duty <= 0)
-                LEDSTRING::duty_save = 0;
-
+void LEDString::set(int duty){
+        duty_save = duty;
+        if(duty >= 10) duty_save = 10;
+        if(duty <= 0) duty_save = 0;
 }
 
-void ledStr_on() {
-        if (LEDSTRING::duty_old <= 20) {
-                ledStr_move(100);
-        } else {
-                ledStr_move(LEDSTRING::duty_old);
+void LEDString::on(){
+        if(duty_old <= 20) {
+                LEDString::move(100);
+        }else{
+                LEDString::move(duty_old);
         }
-        LEDSTRING::status = 1;
+        LEDString::status = 1;
 }
 
-void ledStr_off() {
-        LEDSTRING::duty_old = LEDSTRING::duty_save;
-        LEDSTRING::status = 0;
-        ledStr_move(0);
+void LEDString::off(){
+        duty_old = duty_save;
+        status = 0;
+        LEDString::move(0);
 }
 
-void ledStr_move(int duty, int time_ms) {
-        if(duty <= 15) {    //flickering on low levels
+void LEDString::move(int duty, int time_ms){
+        if(duty <= 15) { //flickering on low levels
                 duty = 0;
         }
         duty = duty/10;
-        if (LEDSTRING::duty_save > duty) {
-                LEDSTRING::direction = 0;
-                LEDSTRING::steps = time_ms / (LEDSTRING::duty_save - duty);
+        if (duty_save > duty) {
+                direction = 0;
+                steps = time_ms / (duty_save - duty);
         }
-        if (LEDSTRING::duty_save < duty) {
-                LEDSTRING::direction = 1;
-                LEDSTRING::steps = time_ms / (duty - LEDSTRING::duty_save);
+        if (duty_save < duty) {
+                direction = 1;
+                steps = time_ms / (duty - duty_save);
         }
-        Serial.println(duty);
-        Serial.println(LEDSTRING::duty_save);
-        Serial.println(LEDSTRING::steps);
-        LEDSTRING::duty_goal = duty;
-        LEDSTRING::tick.attach_ms(LEDSTRING::steps, LEDSTRING::tickHandlerLEDStr);
+        duty_goal = duty;
+        tick.attach_ms(steps, LEDSTRING::tickHandlerLEDStr,this);
 }
 
-boolean ledStr_ismoving() {
-        if (LEDSTRING::duty_goal == LEDSTRING::duty_save) {
+bool LEDString::ismoving(){
+        if(duty_goal == duty_save) {
                 return false;
         } else {
                 return true;
         }
 }
 
-int ledStr_status() {
-        if (LEDSTRING::duty_save <= 10) {
-                LEDSTRING::status = 0;
+int LEDString::getStatus(){
+        if (duty_save <= 10) {
+                status = 0;
         }
-        if (LEDSTRING::duty_save >= 11) {
-                LEDSTRING::status = 1;
+        if (duty_save >= 11) {
+                status = 1;
         }
-        return LEDSTRING::status;
+        return status;
 }
 
-void ledStr_up() {
-        ledStr_set(LEDSTRING::duty_save + 1);
+void LEDString::up(){
+        set(duty_save+1);
 }
 
-void ledStr_down() {
-        ledStr_set(LEDSTRING::duty_save - 1);
+void LEDString::down(){
+        set(duty_save-1);
 }
 
-int ledStr_getDuty() {
-        return LEDSTRING::duty_save;
+int LEDString::getDuty(){
+        return duty_save;
 }
 
-
-void LEDSTRING::wurstPWM(int duty){
-        if(duty > 10) duty = 10;
-        if(duty < 0) duty = 0;
-
+int LEDString::getDirection(){
+        return direction;
 }
 
-void LEDSTRING::wurstPWMHandler(uint8_t state){
-        digitalWrite(LS, state);
-        if(state == (uint8_t) 1) {
-                LEDSTRING::wurstPWMever.once_ms(duty_save, wurstPWMHandler,(uint8_t) 0);
+void LEDSTRING::tickHandlerLEDStr(LEDString *obj){
+        if(obj->getDirection() == 0) {
+                obj->down();
+        }
+        if(obj->getDirection() == 1) {
+                obj->up();
+        }
+        if(!obj->ismoving()) {
+                obj->tick.detach();
+        }
+}
+
+void LEDSTRING::wurstPWMHandler(LEDString *obj){
+        digitalWrite(obj->Pin, obj->state);
+        if(obj->state == (uint8_t) 1) {
+                obj->state = 0;
+                obj->wurstPWMever.once_ms(obj->getDuty(), LEDSTRING::wurstPWMHandler,obj);
         }else{
-                if(duty_save == 0) {    //flickering on low levels
-                        LEDSTRING::wurstPWMever.once_ms(10, wurstPWMHandler,(uint8_t) 0);
+                if(obj->getDuty() == 0) {
+                        obj->state = 0;
+                        obj->wurstPWMever.once_ms(10, LEDSTRING::wurstPWMHandler, obj);
                         return;
                 }
-                LEDSTRING::wurstPWMever.once_ms(10-duty_save, wurstPWMHandler,(uint8_t) 1);
-        }
-
-}
-
-void LEDSTRING::tickHandlerLEDStr() {
-        if (LEDSTRING::direction == 0) {
-                ledStr_set(LEDSTRING::duty_save - 1);
-        }
-        if (LEDSTRING::direction == 1) {
-                ledStr_set(LEDSTRING::duty_save + 1);
-        }
-        if (LEDSTRING::duty_goal == LEDSTRING::duty_save) {
-                LEDSTRING::tick.detach();
+                obj->state = 1;
+                obj->wurstPWMever.once_ms(10-obj->getDuty(), LEDSTRING::wurstPWMHandler,obj);
+                return;
         }
 }

@@ -35,7 +35,7 @@
 #include "ACDimmer.h"
 #include "LEDStringcpp.hpp"
 #include "config.h"
-#include "touchAutomat.h"
+#include "touchAutomatcpp.hpp"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESP8266HTTPClient.h>
@@ -92,6 +92,7 @@ Ticker ShedPub;
 WiFiClient espClient;
 PubSubClient client(MQTT_IP, MQTT_PORT, callback, espClient);
 LEDString lamps(D1);
+touchAutomat *ta1 = touchAutomat::instance();
 
 void setup() {
         Serial.begin(115200);
@@ -101,9 +102,9 @@ void setup() {
 
         init_dimmer();
         lamps.init();
-        pinMode(TOUCH, INPUT);
 
-        attachInterrupt(digitalPinToInterrupt(TOUCH), touchISR, CHANGE);
+        ta1->init(changeLvl,TOUCH);
+
         WiFi.mode(WIFI_STA);
         WiFi.begin(WIFI_SSID, WIFI_PASS);
         while (WiFi.status() != WL_CONNECTED) {
@@ -148,7 +149,7 @@ void loop() {
         client.loop();
         httpServer.handleClient();
         // dimmer();
-        touchAutomat();
+        //touchAutomat();
         funWithFlags();
 
         MDNS.update();

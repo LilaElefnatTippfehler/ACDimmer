@@ -6,45 +6,52 @@
    Device is connected to MQTT Server.
    MQTT Topic structure I used is:
    /lampen/DEVICE_NAME/
-                   /status    Gets turn on/off commands from here (from other clients)
-                   /pwm       Gets the level of brightness from here 0-100
+                   /status    Gets turn on/off commands from here (from other
+   clients) /pwm       Gets the level of brightness from here 0-100
 
-   /lampen/ada/json  Bridged AdafruitIO feed here. Commands come from Google Assistant via IFTTT
+   /lampen/ada/json  Bridged AdafruitIO feed here. Commands come from Google
+   Assistant via IFTTT
 
-   /DEVICE_NAME      In these topics every device publishes its status/brightness/sensors/whatever
+   /DEVICE_NAME      In these topics every device publishes its
+   status/brightness/sensors/whatever
 
    Commands look like this:
-   IFTT_ACTIVATION_STRING KEYWORD                        This one turns on/off all lamps that subscibed to /ada/lampen
-   KEYWORD out of On[] or Off[]
+   IFTT_ACTIVATION_STRING KEYWORD                        This one turns on/off
+   all lamps that subscibed to /ada/lampen KEYWORD out of On[] or Off[]
 
-   IFTT_ACTIVATION_STRING DEVICE_NAME KEYWORD            This turns on only the device with the name DEVICE_NAME.
-   KEYWORD out of On[] or Off[]                          KEYWORD must be the first and last word after DEVICE_NAME
+   IFTT_ACTIVATION_STRING DEVICE_NAME KEYWORD            This turns on only the
+   device with the name DEVICE_NAME. KEYWORD out of On[] or Off[] KEYWORD must be
+   the first and last word after DEVICE_NAME
+
 
    IFTT_ACTIVATION_STRING DEVICE_NAME KEYWORD NUMBER     Dimming the lamp to NUMBER percent. everything after NUMBER will be ignored
    KEYWORD out of lvl[]     NUMBER 0-100
 
    if there is the same word in On[]/Off[] and lvl[] the last command wont work if it is said as first word after DEVICE_NAME
    and as last word of the command.
+
  */
 
-
-#include <ESP8266WiFi.h>
-#include <ESP8266mDNS.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266HTTPUpdateServer.h>
-#include <ESP8266HTTPClient.h>
-#include <PubSubClient.h>
+#include "ACDimmer.hpp"
+#include "LEDString.hpp"
+#include "config.h"
+#include "touchAutomat.hpp"
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include "ACDimmer.h"
-#include "touchAutomat.h"
-#include "config.h"
+#include <ESP8266HTTPClient.h>
+#include <ESP8266HTTPUpdateServer.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <PubSubClient.h>
 
-
-#define TOUCH D7
+#define LAMPS D1
+#define TOUCH D2
+#define ZC D5
+#define PWM D6
 #define CLIENTID "ESP8266Client-"
 
-void callback(char* topic, byte* payload, unsigned int length);
+void callback(char *topic, byte *payload, unsigned int length);
 boolean reconnect();
 void MQTTKeepTrack();
 void MQTTpubISR();
@@ -53,19 +60,22 @@ void finishedStartUp(int speed);
 void timeISR();
 void funWithFlags();
 void shedPubISR();
+void changeLvl(String cmd, int duty = 0, int time = 0);
 
 //---------Voice Commands Key Words--------
-const String On[]= {"ein","an","auf"};
+const String On[] = {"ein", "an", "auf"};
 const uint8_t numOn = 3;
-const String Off[] = {"aus","ab"};
+const String Off[] = {"aus", "ab"};
 const uint8_t numOff = 2;
+
 const String lvl[] = {"auf","zu"};
 const uint8_t numLvl = 2;
 
-const char* host = "esp8266-";
-const char* update_path = "/firmware";
-const char* update_username = USERNAME;
-const char* update_password = PASSWORD;
+
+const char *host = "esp8266-";
+const char *update_path = "/firmware";
+const char *update_username = USERNAME;
+const char *update_password = PASSWORD;
 
 volatile uint8_t flag_time = 0;
 volatile uint8_t flag_MQTTpub = 0;
@@ -83,21 +93,24 @@ Ticker MQTTpub;
 Ticker checkTime;
 Ticker ShedPub;
 WiFiClient espClient;
-PubSubClient client(MQTT_IP,MQTT_PORT,callback,espClient);
-
+PubSubClient client(MQTT_IP, MQTT_PORT, callback, espClient);
+LEDString lamps(LAMPS);
+touchAutomat *ta = touchAutomat::instance();
+ACDimmer *dimmer = ACDimmer::instance();
 
 void setup() {
         Serial.begin(115200);
-        init_dimmer();
-        pinMode(TOUCH,INPUT_PULLDOWN_16);
-        attachInterrupt(digitalPinToInterrupt(TOUCH), touchISR, CHANGE);
+        while (!Serial);
+        //init_dimmer();
+        dimmer->init(ZC,PWM);
+        lamps.init();
+        ta->init(changeLvl,TOUCH);
         WiFi.mode(WIFI_STA);
-        WiFi.begin(WIFI_SSID,WIFI_PASS);
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
         while (WiFi.status() != WL_CONNECTED) {
                 delay(500);
                 Serial.print(".");
         }
-        while(!Serial);
         Serial.println("");
         Serial.print("Connected, IP address: ");
         Serial.println(WiFi.localIP());
@@ -105,19 +118,18 @@ void setup() {
         httpServer_ini();
 
         MQTTpub.attach(1.0, MQTTpubISR);
-        checkTime.attach(30.0,timeISR);
-        ShedPub.attach(60.0,shedPubISR);
+        checkTime.attach(30.0, timeISR);
+        ShedPub.attach(60.0, shedPubISR);
 
         String ClientID = String(CLIENTID) + DEVICE_NAME;
-        dimmer_move(50, 800);
+        changeLvl("move_ms",50, 800);
         delay(800);
-        dimmer_move(20,800);
+        changeLvl("move_ms",20, 800);
         delay(800);
-        dimmer_move(50, 800);
+        changeLvl("move_ms",50, 800);
         delay(800);
-        dimmer_move(20,800);
+        changeLvl("move_ms",0, 800);
         delay(800);
-        dimmer_set(0);
 }
 
 void loop() {
@@ -130,44 +142,41 @@ void loop() {
                                 lastReconnectAttempt = 0;
                         }
                 }
-
         }
         client.loop();
         httpServer.handleClient();
-        //dimmer();
-        touchAutomat();
+        // dimmer();
+        //touchAutomat();
         funWithFlags();
 
         MDNS.update();
-
-
 }
 
-
-void httpServer_ini(){
+void httpServer_ini() {
         char buffer[100];
-        sprintf(buffer,"%s%s",host,DEVICE_NAME);
+        sprintf(buffer, "%s%s", host, DEVICE_NAME);
         MDNS.begin(buffer);
         httpUpdater.setup(&httpServer, update_path, update_username, update_password);
         httpServer.begin();
         MDNS.addService("http", "tcp", 80);
-        Serial.printf("HTTPUpdateServer ready! Open http://%s.local%s in your browser and login with username '%s' and password '%s'\n", buffer, update_path, update_username, update_password);
+        Serial.printf("HTTPUpdateServer ready! Open http://%s.local%s in your "
+                      "browser and login with username '%s' and password '%s'\n",
+                      buffer, update_path, update_username, update_password);
         //------
 }
 
-
 boolean reconnect() {
         // Loop until we're reconnected
-        if (client.connect(ClientID.c_str(),MQTT_USR,MQTT_PW)) {
+        if (client.connect(ClientID.c_str(), MQTT_USR, MQTT_PW)) {
                 char buffer[100];
-                sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/status");
-                client.subscribe(buffer,1);
-                sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/pwm");
-                client.subscribe(buffer,1);
-                sprintf(buffer,"%s%s","/",DEVICE_NAME);
-                client.subscribe(buffer,1);
-                client.subscribe("/lampen/ada/json",1);
-        }else{
+                sprintf(buffer, "%s%s%s", "/lampen/", DEVICE_NAME, "/status");
+                client.subscribe(buffer, 1);
+                sprintf(buffer, "%s%s%s", "/lampen/", DEVICE_NAME, "/pwm");
+                client.subscribe(buffer, 1);
+                sprintf(buffer, "%s%s", "/", DEVICE_NAME);
+                client.subscribe(buffer, 1);
+                client.subscribe("/lampen/ada/json", 1);
+        } else {
                 Serial.print("MQTT conncetion failed, rc=");
                 Serial.print(client.state());
                 Serial.println(" try again in 5 seconds");
@@ -175,27 +184,28 @@ boolean reconnect() {
         return client.connected();
 }
 
-
-
-void MQTTKeepTrack(){
+void MQTTKeepTrack() {
         static int last_val = 0;
-        if(client.connected()) {
-                if(last_val != dimmer_getDuty()) {
-                        last_val = dimmer_getDuty();
+        if (client.connected()) {
+                if (last_val != dimmer->getDuty()) {
+                        last_val = dimmer->getDuty();
                         return;
                 }
-                if(old_status != dimmer_status()||old_duty != dimmer_getDuty()||flag_ShedPub) {
+                if (old_status != dimmer->getStatus() || old_duty != dimmer->getDuty() || flag_ShedPub) {
                         flag_time = 1;
+
                         const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
                         StaticJsonDocument<capacity> root; // New ArduinoJson 6 syntax
-                        old_status = dimmer_status();
-                        old_duty = dimmer_getDuty();
+                        old_status = dimmer->getStatus();
+                        old_duty = dimmer->getDuty();
                         root["level"].set(old_duty);
+
                         root["status"].set(old_status);
                         JsonObject time = root.createNestedObject("On time");
                         time["hours"].set(timeOn / 1000 / 60 / 60);
                         time["minutes"].set(timeOn / 1000 / 60 % 60);
                         time["seconds"].set(timeOn / 1000 % 60);
+
                         String topic = "/" + String(DEVICE_NAME);
                         char* buffer = (char*) malloc(topic.length()+1);
                         topic.toCharArray(buffer, topic.length()+1);
@@ -204,92 +214,93 @@ void MQTTKeepTrack(){
                         uint8_t* buffer2 = (uint8_t*) malloc(output.length()+1);
                         output.getBytes(buffer2, output.length()+1);
                         client.publish(buffer, buffer2,output.length()+1,true);
+
                         free(buffer);
                         free(buffer2);
-
                 }
         }
 }
 
-void funWithFlags(){
-        if(flag_MQTTpub) {
+void funWithFlags() {
+        if (flag_MQTTpub) {
                 MQTTKeepTrack();
                 flag_MQTTpub = 0;
                 flag_ShedPub = 0;
         }
-        if(flag_time) {
+        if (flag_time) {
                 static unsigned long turnedOn = 0;
                 static int lastStatus = 0;
-                if(lastStatus == dimmer_status()) {
-                        lastStatus = dimmer_status();
-                        if(dimmer_status() == 1) {
+                if (lastStatus == dimmer->getStatus()) {
+                        lastStatus = dimmer->getStatus();
+                        if (dimmer->getStatus() == 1) {
                                 timeOn += millis() - turnedOn;
                                 turnedOn = millis();
                         }
-                } else{
-                        if(dimmer_status() == 1) {
+                } else {
+                        if (dimmer->getStatus() == 1) {
                                 turnedOn = millis();
-                        }else{
+                        } else {
                                 timeOn += millis() - turnedOn;
                         }
-                        lastStatus = dimmer_status();
+                        lastStatus = dimmer->getStatus();
                 }
                 flag_time = 0;
-
         }
 }
 
-
-void callback(char* topic, byte* payload, unsigned int length){
-        if(!strcmp("/lampen/ada/json",topic)) {
-                const int capacity = 2*JSON_OBJECT_SIZE(4) + JSON_OBJECT_SIZE(5);
+void callback(char *topic, byte *payload, unsigned int length) {
+        if (!strcmp("/lampen/ada/json", topic)) {
+                const int capacity = 2 * JSON_OBJECT_SIZE(4) + JSON_OBJECT_SIZE(5);
                 Serial.println("Adafruit Input");
                 StaticJsonDocument<capacity> msg;
                 DeserializationError err = deserializeJson(msg, payload);
                 String data;
                 if(!err) {
+
                         auto jsondata = msg["data"];
-                        const char* value = jsondata["value"];
+                        const char *value = jsondata["value"];
                         data = String(value);
                 }else{
                         Serial.print("Couldnt parse Json Object from: ");
                         Serial.println(topic);
                         Serial.print("Error: ");
                         Serial.println(err.c_str());
+
                 }
-                Serial.print("Payload: "); Serial.println(data);
+                Serial.print("Payload: ");
+                Serial.println(data);
                 uint8_t i = 0;
-                while(i<numOn) {
-                        if(!data.compareTo(On[i])) {
-                                dimmer_on();
+                while (i < numOn) {
+                        if (!data.compareTo(On[i])) {
+                                changeLvl("on");
                                 return;
                         }
                         i++;
                 }
-                i=0;
-                while(i<numOff) {
-                        if(!data.compareTo(Off[i])) {
-                                dimmer_off();
+                i = 0;
+                while (i < numOff) {
+                        if (!data.compareTo(Off[i])) {
+                                changeLvl("off");
                                 return;
                         }
                         i++;
                 }
 
-                if(data.startsWith(DEVICE_NAME)) {
-                        data.remove(0,strlen(DEVICE_NAME));
+                if (data.startsWith(DEVICE_NAME)) {
+                        data.remove(0, strlen(DEVICE_NAME));
                         data.trim();
                         uint8_t i = 0;
-                        while(i<numOn) {
-                                if(data.endsWith(On[i])&&data.startsWith(On[i])) {
-                                        dimmer_on();
+                        while (i < numOn) {
+                                if (data.endsWith(On[i]) && data.startsWith(On[i])) {
+                                        changeLvl("on");
                                         return;
                                 }
                                 i++;
                         }
-                        i=0;
-                        while(i<numOff) {
-                                if(data.endsWith(Off[i])&&data.startsWith(Off[i])) {
-                                        dimmer_off();
+                        i = 0;
+                        while (i < numOff) {
+                                if (data.endsWith(Off[i]) && data.startsWith(Off[i])) {
+                                        changeLvl("off");
                                         return;
                                 }
                                 i++;
@@ -298,37 +309,37 @@ void callback(char* topic, byte* payload, unsigned int length){
                         while(i<numLvl) {
                                 if(data.startsWith(lvl[i])) {
                                         data.remove(0,lvl[i].length());
+
                                         int duty;
                                         duty = data.toInt();
-                                        dimmer_move(duty);
+                                        changeLvl("move",duty);
                                 }
                                 i++;
                         }
-
                 }
                 return;
         }
         char buffer[100];
-        sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/status");
-        if(!strcmp(buffer,topic)) {
+        sprintf(buffer, "%s%s%s", "/lampen/", DEVICE_NAME, "/status");
+        if (!strcmp(buffer, topic)) {
                 char buffer[10];
-                snprintf(buffer,length+1,"%s",payload);
-                if(!strcmp(buffer,"1")) {
-                        dimmer_on();
+                snprintf(buffer, length + 1, "%s", payload);
+                if (!strcmp(buffer, "1")) {
+                        changeLvl("on");
                         return;
                 }
-                if(!strcmp(buffer,"0")) {
-                        dimmer_off();
+                if (!strcmp(buffer, "0")) {
+                        changeLvl("off");
                         return;
                 }
         }
-        sprintf(buffer,"%s%s%s","/lampen/",DEVICE_NAME,"/pwm");
-        if(!strcmp(buffer,topic)) {
+        sprintf(buffer, "%s%s%s", "/lampen/", DEVICE_NAME, "/pwm");
+        if (!strcmp(buffer, topic)) {
                 int duty;
                 char buffer[10];
-                snprintf(buffer,length+1,"%s",payload);
+                snprintf(buffer, length + 1, "%s", payload);
                 duty = atoi(buffer);
-                dimmer_move(duty);
+                changeLvl("move",duty);
         }
         sprintf(buffer,"%s%s","/",DEVICE_NAME);
         if(!strcmp(buffer,topic)) {
@@ -350,19 +361,35 @@ void callback(char* topic, byte* payload, unsigned int length){
 
                 client.unsubscribe(buffer);
         }
-
-
-
 }
 
-void MQTTpubISR(){
+void changeLvl(String cmd,int duty, int time){
+        if(!cmd.compareTo("move")) {
+                dimmer->move(duty);
+                lamps.move(duty);
+        }else if(!cmd.compareTo("move_ms")) {
+                dimmer->move(duty,time);
+                lamps.move(duty,time);
+        }else if(!cmd.compareTo("set")) {
+                dimmer->set(duty);
+                lamps.set(duty);
+        }else if(!cmd.compareTo("on")) {
+                dimmer->on();
+                lamps.on();
+        }else if(!cmd.compareTo("off")) {
+                dimmer->off();
+                lamps.off();
+        }
+}
+
+void MQTTpubISR() {
         flag_MQTTpub = 1;
 }
 
-void timeISR(){
+void timeISR() {
         flag_time = 1;
 }
 
-void shedPubISR(){
+void shedPubISR() {
         flag_ShedPub = 1;
 }

@@ -1,210 +1,198 @@
-#include "ACDimmer.h"
+#include "ACDimmer.hpp"
+#include <Ticker.h>
+#include <Arduino.h>
 
-void zeroCross();
-int getPeriod();
-void handlerTimer();
-void tickHandler();
-void initPeriod();
-void updateTime(int time);
+bool ACDimmer::instanceFlag = false;
+ACDimmer* ACDimmer::single = NULL;
+ACDimmer* ACDimmer::instance(){
+        if(!instanceFlag) {
+                single = new ACDimmer();
+                instanceFlag = true;
+                return single;
+        }
+        else
+        {
+                return single;
+        }
+}
 
-uint8_t flag_timer1 = 0;
-uint8_t status = 2;
-unsigned long lastZC = 0;
-unsigned long thisZC = 0;
-long periodBuffer[PERIODBUFFER];
-long period = 0;
-long readings = 1;
-int trigger = 0;
-uint32_t tLow = 0;
-int duty_save = 0;
-int duty_goal = 0;
-int duty_old = 0;
-int direction = -1;
-unsigned long steps = 0;
+ACDimmer::~ACDimmer(){
+        instanceFlag = false;
+}
 
-
-Ticker tick;
-
-void init_dimmer(){
+void ACDimmer::init(uint8_t ZC_t, uint8_t PWM_t){
+        ZC = ZC_t; PWM = PWM_t;
         pinMode(ZC, INPUT_PULLUP);
         pinMode(PWM, OUTPUT);
         timer1_isr_init();
-        timer1_attachInterrupt(handlerTimer);
-        timer1_enable(TIM_DIV16,TIM_EDGE,TIM_SINGLE);
-        attachInterrupt(digitalPinToInterrupt(ZC), initPeriod, FALLING);
-        while(!getPeriod());
-        //period = EXPPERIOD;       //Just for debugging
+        timer1_attachInterrupt(this->handlerTimer);
+        timer1_enable(TIM_DIV16, TIM_EDGE, TIM_SINGLE);
+        attachInterrupt(digitalPinToInterrupt(ZC), this->initPeriod, FALLING);
+        while (!this->getPeriod());
         detachInterrupt(digitalPinToInterrupt(ZC));
-        attachInterrupt(digitalPinToInterrupt(ZC), zeroCross, FALLING);
+        attachInterrupt(digitalPinToInterrupt(ZC), this->zeroCross, FALLING);
 
-        dimmer_set(50);
-        dimmer_set(1);
+        this->set(50);
+        this->set(1);
 }
 
-int getPeriod(){
-
+int ACDimmer::getPeriod(){
         int temp = 0;
-        if(lastZC == 0) {
+        static unsigned long lastZC = 0;
+        static long periodBuffer[PERIODBUFFER];
+        if (lastZC == 0) {
                 lastZC = thisZC;
                 return 0;
         }
-        if(lastZC >= thisZC) {
+        if (lastZC >= thisZC) {
                 period = EXPPERIOD;
                 return 0;
         }
-        if((thisZC - lastZC)>=(EXPPERIOD+400)||(thisZC - lastZC)<=(EXPPERIOD-400)) {
-                periodBuffer[readings%PERIODBUFFER] = periodBuffer[readings%PERIODBUFFER-1];
-        }else{
-                periodBuffer[readings%PERIODBUFFER] = thisZC - lastZC;
+        if ((thisZC - lastZC) >= (EXPPERIOD + 400) || (thisZC - lastZC) <= (EXPPERIOD - 400)) {
+                periodBuffer[readings % PERIODBUFFER] = periodBuffer[readings % PERIODBUFFER - 1];
+        } else {
+                periodBuffer[readings % PERIODBUFFER] = thisZC - lastZC;
         }
         lastZC = thisZC;
-        if(!(readings%PERIODBUFFER)) {
-                for(int i = 0; i<PERIODBUFFER; i++) {
+        if (!(readings % PERIODBUFFER)) {
+                for (int i = 0; i < PERIODBUFFER; i++) {
                         temp += periodBuffer[i];
                 }
-                period = temp/PERIODBUFFER;
+                period = temp / PERIODBUFFER;
                 readings = 0;
                 return 1;
         }
         return 0;
-
 }
 
-void dimmer_set(int duty){
+void ACDimmer::set(int duty){
         duty_save = duty;
-        if(duty >= 100) duty_save = 100;
-        if(duty <= 0) duty_save = 0;
-        updateTime(duty_save);
+        if (duty >= 100)
+                duty_save = 100;
+        if (duty <= 0)
+                duty_save = 0;
+        this->updateTime(duty_save);
 }
 
-void dimmer_on(){
-        if(duty_old <= 20) {
-                dimmer_move(100);
-        }else{
-                dimmer_move(duty_old);
+void ACDimmer::on() {
+        if (duty_old <= 20) {
+                this->move(100);
+        } else {
+                this->move(duty_old);
         }
         status = 1;
-
 }
 
-void dimmer_off(){
+void ACDimmer::off() {
         duty_old = duty_save;
         status = 0;
-        dimmer_move(0);
+        this->move(0);
 }
 
-void updateTime(int time){
+void ACDimmer::updateTime(int time) {
         static int temp;
-        if(time <=10 && temp >= 11) {
+        if (time <= 10 && temp >= 11) {
                 temp = 10;
                 detachInterrupt(digitalPinToInterrupt(ZC));
         } else {
-                if(time >= 11 && temp <= 10) {
-                        attachInterrupt(digitalPinToInterrupt(ZC), zeroCross, FALLING);
+                if (time >= 11 && temp <= 10) {
+                        attachInterrupt(digitalPinToInterrupt(ZC), this->zeroCross, FALLING);
                 }
-                if(time >= 99) {
+                if (time >= 99) {
                         temp = 95;
-                }else{
+                } else {
                         temp = time;
                 }
         }
 
-        tLow = period * (100-temp) / 100;
+        tLow = period * (100 - temp) / 100;
 }
 
-void dimmer_move(int duty){
-
-
-
-        if(duty_save > duty) {
+void ACDimmer::move(int duty, int time_ms) {
+        int direction = 0;
+        unsigned long steps = 0;
+        if (duty_save > duty) {
                 direction = 0;
-                steps = DIMMSPEED / (duty_save-duty);
+                steps = time_ms / (duty_save - duty);
         }
-        if(duty_save < duty) {
+        if (duty_save < duty) {
                 direction = 1;
-                steps = DIMMSPEED / (duty-duty_save);
+                steps = time_ms / (duty - duty_save);
         }
 
         duty_goal = duty;
-        tick.attach_ms(steps, tickHandler);
-
+        tick.attach_ms(steps, tickHandler, direction);
 }
 
-void dimmer_move(int duty, int time_ms){
-        if(duty_save > duty) {
-                direction = 0;
-                steps = time_ms / (duty_save-duty);
-        }
-        if(duty_save < duty) {
-                direction = 1;
-                steps = time_ms / (duty-duty_save);
-        }
-
-        duty_goal = duty;
-        tick.attach_ms(steps, tickHandler);
-}
-
-boolean dimmer_ismoving(){
-        Serial.print("duty_goal: "); Serial.println(duty_goal);
-        Serial.print("duty_save: "); Serial.println(duty_save);
-        if(duty_goal == duty_save) {
-                Serial.println("false");
+bool ACDimmer::ismoving() {
+        if (duty_goal == duty_save) {
                 return false;
-        }else{
-                Serial.println("true");
+        } else {
                 return true;
         }
 }
 
-int dimmer_status(){
-        if(duty_save <= 10) {
+int ACDimmer::getStatus() {
+        if (duty_save <= 10) {
                 status = 0;
         }
-        if(duty_save >= 11) {
+        if (duty_save >= 11) {
                 status = 1;
         }
         return status;
 }
 
-void dimmer_up(){
-        dimmer_set(duty_save+1);
+void ACDimmer::up() {
+        this->set(duty_save + 1);
 }
 
-void dimmer_down(){
-        dimmer_set(duty_save-1);
+void ACDimmer::down() {
+        this->set(duty_save - 1);
 }
 
-int dimmer_getDuty(){
+int ACDimmer::getDuty() {
         return duty_save;
 }
 
-void initPeriod(){
+void ACDimmer::initPeriod() {
+        ACDimmer::instance()->initPerISR();
+}
+
+void ACDimmer::initPerISR(){
         thisZC = micros();
         readings++;
 }
 
-void zeroCross(){
-        timer1_write(tLow*5);
-
-}
-void tickHandler(){
-        if(direction == 0) {
-                dimmer_set(duty_save-1);
-        }
-        if(direction == 1) {
-                dimmer_set(duty_save+1);
-        }
-        if(duty_goal == duty_save) tick.detach();
+void ACDimmer::zeroCross(){
+        ACDimmer::instance()->zcISR();
 }
 
-void handlerTimer(){
-        if(flag_timer1) {
+void ACDimmer::zcISR(){
+        timer1_write(this->tLow * 5);
+}
+
+void ACDimmer::handlerTimer(){
+        ACDimmer::instance()->TimerISR();
+}
+
+void ACDimmer::TimerISR(){
+        static bool flag_timer = false;
+        if(flag_timer) {
                 digitalWrite(PWM, LOW);
-                flag_timer1 = 0;
+                flag_timer = false;
         }else{
                 digitalWrite(PWM, HIGH);
                 timer1_write(15*5);
-                flag_timer1 = 1;
+                flag_timer = true;
         }
+}
 
+void ACDimmer::tickHandler(int direction){
+        ACDimmer::instance()->tickISR(direction);
+}
+
+void ACDimmer::tickISR(int direction){
+        if(direction == 0) this->set(this->duty_save - 1);
+        if(direction == 1) this->set(this->duty_save + 1);
+        if(!this->ismoving()) this->tick.detach();
 }

@@ -32,7 +32,8 @@ touchAutomat* touchAutomat::instance(){
 
 void touchAutomat::Tisr(){
         touched(digitalRead(this->pin));
-        if((this->deltaTime >= 30) && (this->deltaTime <= 500)) {
+        Serial.print("touchevent"); Serial.println(this->deltaTime);
+        if((this->deltaTime >= 30) && (this->deltaTime <= TOUCHTIME)) {
                 switch(this->status) {
                 case 0:
                         function("move",20,0);
@@ -59,7 +60,7 @@ void touchAutomat::Tisr(){
                         break;
                 }
         }
-        if(this->deltaTime > 500) {
+        if(this->deltaTime > TOUCHTIME) {
                 if(this->status == 0) {
                         function("move",100,0);
                         this->status = 5;
@@ -68,6 +69,7 @@ void touchAutomat::Tisr(){
                         this->status = 0;
                 }
         }
+        this->deltaTime = 0;
 }
 
 void touchAutomat::touched(uint8_t state){

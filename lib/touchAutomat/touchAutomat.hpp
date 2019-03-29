@@ -1,10 +1,26 @@
+/*
+   This class is far from perfect.
+   it has singleton pattern, because the pin interrupt is hard to implement
+   without that.
+
+   HOW TO USE:
+   touchAutomat *ta = touchAutomat::instance();
+   ta->init(function_to_activate,TOUCH_PIN);
+
+   As this is far from perfect, function_to_activate should look like this:
+   void function_to_activate(String command, int value, int time);
+   its intendet to use with ACDimmer and LEDString.
+
+   Feel free to change TOUCHTIME, it defines the time in ms for long touches
+ */
+
 #ifndef TOUCHAUTOMAT_HPP_
 #define TOUCHAUTOMAT_HPP_
 
 #include <Arduino.h>
 #include <Ticker.h>
 
-#define TOUCHTIME 1000
+#define TOUCHTIME 500
 
 namespace TOUCHAUTOMAT
 {

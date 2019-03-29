@@ -1,3 +1,19 @@
+/*
+   This class is far from perfect.
+   It uses global ISR for the ticker.
+
+   It implements an pseudo PWM through the ticker function.
+   Solution is only in ms and to prevent flickering it only dimms the light
+   in 10 steps.
+
+   HOW TO USE:
+   LEDString lamps(LAMPS_PIN);
+   lamps.init();
+
+   Feel free to change the standart DIMMSPEED.
+
+ */
+
 #ifndef LEDSTRING_HPP_
 #define LEDSTRING_HPP_
 

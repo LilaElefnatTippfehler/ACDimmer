@@ -32,7 +32,7 @@
 
  */
 
-#include "ACDimmer.h"
+#include "ACDimmer.hpp"
 #include "LEDString.hpp"
 #include "config.h"
 #include "touchAutomat.hpp"
@@ -45,7 +45,10 @@
 #include <ESP8266mDNS.h>
 #include <PubSubClient.h>
 
-#define TOUCH D7
+#define LAMPS D1
+#define TOUCH D2
+#define ZC D5
+#define PWM D6
 #define CLIENTID "ESP8266Client-"
 
 void callback(char *topic, byte *payload, unsigned int length);
@@ -91,28 +94,23 @@ Ticker checkTime;
 Ticker ShedPub;
 WiFiClient espClient;
 PubSubClient client(MQTT_IP, MQTT_PORT, callback, espClient);
-LEDString lamps(D1);
-touchAutomat *ta1 = touchAutomat::instance();
+LEDString lamps(LAMPS);
+touchAutomat *ta = touchAutomat::instance();
+ACDimmer *dimmer = ACDimmer::instance();
 
 void setup() {
         Serial.begin(115200);
-
-
-        //init_ledStr();
-
-        init_dimmer();
+        while (!Serial);
+        //init_dimmer();
+        dimmer->init(ZC,PWM);
         lamps.init();
-
-        ta1->init(changeLvl,TOUCH);
-
+        ta->init(changeLvl,TOUCH);
         WiFi.mode(WIFI_STA);
         WiFi.begin(WIFI_SSID, WIFI_PASS);
         while (WiFi.status() != WL_CONNECTED) {
                 delay(500);
                 Serial.print(".");
         }
-        while (!Serial)
-                ;
         Serial.println("");
         Serial.print("Connected, IP address: ");
         Serial.println(WiFi.localIP());
@@ -130,9 +128,8 @@ void setup() {
         delay(800);
         changeLvl("move_ms",50, 800);
         delay(800);
-        changeLvl("move_ms",20, 800);
+        changeLvl("move_ms",0, 800);
         delay(800);
-        changeLvl("set",0);
 }
 
 void loop() {
@@ -190,17 +187,17 @@ boolean reconnect() {
 void MQTTKeepTrack() {
         static int last_val = 0;
         if (client.connected()) {
-                if (last_val != dimmer_getDuty()) {
-                        last_val = dimmer_getDuty();
+                if (last_val != dimmer->getDuty()) {
+                        last_val = dimmer->getDuty();
                         return;
                 }
-                if (old_status != dimmer_status() || old_duty != dimmer_getDuty() || flag_ShedPub) {
+                if (old_status != dimmer->getStatus() || old_duty != dimmer->getDuty() || flag_ShedPub) {
                         flag_time = 1;
 
                         const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
                         StaticJsonDocument<capacity> root; // New ArduinoJson 6 syntax
-                        old_status = dimmer_status();
-                        old_duty = dimmer_getDuty();
+                        old_status = dimmer->getStatus();
+                        old_duty = dimmer->getDuty();
                         root["level"].set(old_duty);
 
                         root["status"].set(old_status);
@@ -233,19 +230,19 @@ void funWithFlags() {
         if (flag_time) {
                 static unsigned long turnedOn = 0;
                 static int lastStatus = 0;
-                if (lastStatus == dimmer_status()) {
-                        lastStatus = dimmer_status();
-                        if (dimmer_status() == 1) {
+                if (lastStatus == dimmer->getStatus()) {
+                        lastStatus = dimmer->getStatus();
+                        if (dimmer->getStatus() == 1) {
                                 timeOn += millis() - turnedOn;
                                 turnedOn = millis();
                         }
                 } else {
-                        if (dimmer_status() == 1) {
+                        if (dimmer->getStatus() == 1) {
                                 turnedOn = millis();
                         } else {
                                 timeOn += millis() - turnedOn;
                         }
-                        lastStatus = dimmer_status();
+                        lastStatus = dimmer->getStatus();
                 }
                 flag_time = 0;
         }
@@ -368,19 +365,19 @@ void callback(char *topic, byte *payload, unsigned int length) {
 
 void changeLvl(String cmd,int duty, int time){
         if(!cmd.compareTo("move")) {
-                dimmer_move(duty);
+                dimmer->move(duty);
                 lamps.move(duty);
         }else if(!cmd.compareTo("move_ms")) {
-                dimmer_move(duty,time);
+                dimmer->move(duty,time);
                 lamps.move(duty,time);
         }else if(!cmd.compareTo("set")) {
-                dimmer_set(duty);
+                dimmer->set(duty);
                 lamps.set(duty);
         }else if(!cmd.compareTo("on")) {
-                dimmer_on();
+                dimmer->on();
                 lamps.on();
         }else if(!cmd.compareTo("off")) {
-                dimmer_off();
+                dimmer->off();
                 lamps.off();
         }
 }

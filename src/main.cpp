@@ -61,15 +61,12 @@ void timeISR();
 void funWithFlags();
 void shedPubISR();
 void changeLvl(String cmd, int duty = 0, int time = 0);
+void announce();
 
-//---------Voice Commands Key Words--------
-const String On[] = {"ein", "an", "auf"};
-const uint8_t numOn = 3;
-const String Off[] = {"aus", "ab"};
-const uint8_t numOff = 2;
-
-const String lvl[] = {"auf","zu"};
-const uint8_t numLvl = 2;
+//---------Announce Arrays----------------
+//You'll also have to change announce function
+const String data[] = {"status","brightness","ontime"};
+const String cmd[] = {"status","brightness"};
 
 
 const char *host = "esp8266-";
@@ -121,7 +118,7 @@ void setup() {
         checkTime.attach(30.0, timeISR);
         ShedPub.attach(60.0, shedPubISR);
 
-        String ClientID = String(CLIENTID) + DEVICE_NAME;
+        ClientID = String(CLIENTID) + DEVICE_NAME;
         changeLvl("move_ms",50, 800);
         delay(800);
         changeLvl("move_ms",20, 800);
@@ -175,7 +172,10 @@ boolean reconnect() {
                 client.subscribe(buffer, 1);
                 sprintf(buffer, "%s%s", "/", DEVICE_NAME);
                 client.subscribe(buffer, 1);
-                client.subscribe("/lampen/ada/json", 1);
+                sprintf(buffer, "%s%s%s", "/actu/", DEVICE_NAME, "/cmd");
+                client.subscribe(buffer, 1);
+                announce();
+
         } else {
                 Serial.print("MQTT conncetion failed, rc=");
                 Serial.print(client.state());
@@ -221,6 +221,36 @@ void MQTTKeepTrack() {
         }
 }
 
+void announce(){
+        if(client.connected()) {
+                const int capacity = JSON_ARRAY_SIZE(2) + JSON_ARRAY_SIZE(3) + JSON_OBJECT_SIZE(8); //hiher memory use...
+                StaticJsonDocument<capacity> doc;
+                JsonObject root = doc.to<JsonObject>();
+                Serial.println(root.memoryUsage());
+                root["device"] = String(DEVICE_NAME);
+                root["ip"] = WiFi.localIP();
+                Serial.println(WiFi.localIP());
+                JsonArray cmdJ = root.createNestedArray("cmd");
+                for(int i = 0; i<2; i++) {
+                        Serial.print("cmd: ");
+                        Serial.println(cmdJ.add(cmd[i]));
+                }
+                JsonArray dataJ = root.createNestedArray("data");
+                for(int j = 0; j<3; j++) {
+                        Serial.print("data: ");
+                        Serial.println(dataJ.add(data[j]));
+                }
+                String output;
+                serializeJson(root, output);
+                uint8_t* buffer = (uint8_t*) malloc(output.length()+1);
+                output.getBytes(buffer, output.length()+1);
+                client.publish("/announce", buffer,output.length()+1);
+                free(buffer);
+
+                client.subscribe("/announce/fetch",1);
+        }
+}
+
 void funWithFlags() {
         if (flag_MQTTpub) {
                 MQTTKeepTrack();
@@ -249,17 +279,23 @@ void funWithFlags() {
 }
 
 void callback(char *topic, byte *payload, unsigned int length) {
-        if (!strcmp("/lampen/ada/json", topic)) {
+        char buffer[100];
+        sprintf(buffer, "%s%s%s", "/actu/", DEVICE_NAME, "/cmd");
+        if (!strcmp(buffer, topic)) {
                 const int capacity = 2 * JSON_OBJECT_SIZE(4) + JSON_OBJECT_SIZE(5);
-                Serial.println("Adafruit Input");
                 StaticJsonDocument<capacity> msg;
                 DeserializationError err = deserializeJson(msg, payload);
                 String data;
                 if(!err) {
 
-                        auto jsondata = msg["data"];
-                        const char *value = jsondata["value"];
-                        data = String(value);
+                        auto cmd = msg["cmd"];
+                        if(cmd.containsKey("brightness")) {
+                                uint8_t lum = cmd["brightness"];
+                                int duty = lum/255*100;
+                                Serial.println(lum);
+                                Serial.println(duty);
+                                changeLvl("move",duty);
+                        }
                 }else{
                         Serial.print("Couldnt parse Json Object from: ");
                         Serial.println(topic);
@@ -267,59 +303,7 @@ void callback(char *topic, byte *payload, unsigned int length) {
                         Serial.println(err.c_str());
 
                 }
-                Serial.print("Payload: ");
-                Serial.println(data);
-                uint8_t i = 0;
-                while (i < numOn) {
-                        if (!data.compareTo(On[i])) {
-                                changeLvl("on");
-                                return;
-                        }
-                        i++;
-                }
-                i = 0;
-                while (i < numOff) {
-                        if (!data.compareTo(Off[i])) {
-                                changeLvl("off");
-                                return;
-                        }
-                        i++;
-                }
-
-                if (data.startsWith(DEVICE_NAME)) {
-                        data.remove(0, strlen(DEVICE_NAME));
-                        data.trim();
-                        uint8_t i = 0;
-                        while (i < numOn) {
-                                if (data.endsWith(On[i]) && data.startsWith(On[i])) {
-                                        changeLvl("on");
-                                        return;
-                                }
-                                i++;
-                        }
-                        i = 0;
-                        while (i < numOff) {
-                                if (data.endsWith(Off[i]) && data.startsWith(Off[i])) {
-                                        changeLvl("off");
-                                        return;
-                                }
-                                i++;
-                        }
-                        i=0;
-                        while(i<numLvl) {
-                                if(data.startsWith(lvl[i])) {
-                                        data.remove(0,lvl[i].length());
-
-                                        int duty;
-                                        duty = data.toInt();
-                                        changeLvl("move",duty);
-                                }
-                                i++;
-                        }
-                }
-                return;
         }
-        char buffer[100];
         sprintf(buffer, "%s%s%s", "/lampen/", DEVICE_NAME, "/status");
         if (!strcmp(buffer, topic)) {
                 char buffer[10];
@@ -361,6 +345,8 @@ void callback(char *topic, byte *payload, unsigned int length) {
 
                 client.unsubscribe(buffer);
         }
+
+        if(!strcmp("/announce/fetch",topic)) announce();
 }
 
 void changeLvl(String cmd,int duty, int time){

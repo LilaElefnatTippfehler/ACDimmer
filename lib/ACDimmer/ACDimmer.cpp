@@ -15,7 +15,6 @@ ACDimmer* ACDimmer::instance(){
                 return single;
         }
 }
-
 ACDimmer::~ACDimmer(){
         instanceFlag = false;
 }

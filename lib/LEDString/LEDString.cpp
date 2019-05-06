@@ -57,12 +57,12 @@ bool LEDString::ismoving(){
         }
 }
 
-int LEDString::getStatus(){
-        if (duty_save <= 10) {
-                status = 0;
+bool LEDString::getStatus(){
+        if (duty_save == 0) {
+                status = false;
         }
-        if (duty_save >= 11) {
-                status = 1;
+        if (duty_save >= 1) {
+                status = true;
         }
         return status;
 }
@@ -76,7 +76,7 @@ void LEDString::down(){
 }
 
 int LEDString::getDuty(){
-        return duty_save;
+        return duty_save * 10;
 }
 
 int LEDString::getDirection(){
@@ -99,7 +99,7 @@ void LEDSTRING::wurstPWMHandler(LEDString *obj){
         digitalWrite(obj->Pin, obj->state);
         if(obj->state == (uint8_t) 1) {
                 obj->state = 0;
-                obj->wurstPWMever.once_ms(obj->getDuty(), LEDSTRING::wurstPWMHandler,obj);
+                obj->wurstPWMever.once_ms(obj->getDuty()/10, LEDSTRING::wurstPWMHandler,obj);
         }else{
                 if(obj->getDuty() == 0) {
                         obj->state = 0;
@@ -107,7 +107,7 @@ void LEDSTRING::wurstPWMHandler(LEDString *obj){
                         return;
                 }
                 obj->state = 1;
-                obj->wurstPWMever.once_ms(10-obj->getDuty(), LEDSTRING::wurstPWMHandler,obj);
+                obj->wurstPWMever.once_ms(10-obj->getDuty()/10, LEDSTRING::wurstPWMHandler,obj);
                 return;
         }
 }

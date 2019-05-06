@@ -44,6 +44,9 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <PubSubClient.h>
+#include "homie.hpp"
+
+#define SERIAL true
 
 #define LAMPS D1
 #define TOUCH D2
@@ -61,6 +64,14 @@ void timeISR();
 void funWithFlags();
 void shedPubISR();
 void changeLvl(String cmd, int duty = 0, int time = 0);
+void dimmerMove(int duty, int time = 0);
+void lampMove(int duty, int time = 0);
+void dimmerSet(int duty);
+void lampSet(int duty);
+void dimmerOnOff(bool onoff);
+void lampOnOff(bool onoff);
+void dimmerMQTTUpdate(int time = 1000);
+void lampMQTTUpdate(int time = 1000);
 void announce();
 
 //---------Announce Arrays----------------
@@ -69,7 +80,6 @@ const String data[] = {"status","brightness","ontime"};
 const String cmd[] = {"status","brightness"};
 
 
-const char *host = "esp8266-";
 const char *update_path = "/firmware";
 const char *update_username = USERNAME;
 const char *update_password = PASSWORD;
@@ -94,6 +104,7 @@ PubSubClient client(MQTT_IP, MQTT_PORT, callback, espClient);
 LEDString lamps(LAMPS);
 touchAutomat *ta = touchAutomat::instance();
 ACDimmer *dimmer = ACDimmer::instance();
+Homie homieCTRL = Homie(&client);
 
 void setup() {
         Serial.begin(115200);
@@ -106,31 +117,55 @@ void setup() {
         WiFi.begin(WIFI_SSID, WIFI_PASS);
         while (WiFi.status() != WL_CONNECTED) {
                 delay(500);
-                Serial.print(".");
+                if(SERIAL) Serial.print(".");
         }
-        Serial.println("");
-        Serial.print("Connected, IP address: ");
-        Serial.println(WiFi.localIP());
+        if(SERIAL) Serial.println("");
+        if(SERIAL) Serial.print("Connected, IP address: ");
+        if(SERIAL) Serial.println(WiFi.localIP());
 
         httpServer_ini();
+        HomieDevice homieDevice = HomieDevice(DEVICE_NAME, "Nachttisch", WiFi.localIP().toString().c_str(),
+                                              WiFi.macAddress().c_str(), FW_NAME, FW_VERSION,
+                                              "esp8266", "60");
 
-        MQTTpub.attach(1.0, MQTTpubISR);
-        checkTime.attach(30.0, timeISR);
-        ShedPub.attach(60.0, shedPubISR);
+        HomieNode stringLights = HomieNode("string-lights", "String Lights", "LEDDimmer");
+        HomieNode dimmer = HomieNode("dimmer", "Dimmer", "ACDimmer");
+        HomieProperties brightness = HomieProperties("brightness", "Brightness",
+                                                     true, true, "%",
+                                                     homie::float_t, "0:1");
+        HomieProperties power = HomieProperties("power", "Power",
+                                                true, true, "",
+                                                homie::boolean_t, "");
+
+        dimmer.addProp(brightness);
+        dimmer.addProp(power);
+        stringLights.addProp(brightness);
+        stringLights.addProp(power);
+        homieDevice.addNode(dimmer);
+        homieDevice.addNode(stringLights);
+        homieCTRL.setDevice(homieDevice);
+        if(SERIAL) {
+                Serial.println(dimmer.toString().c_str());
+                Serial.println(brightness.toString().c_str());
+                Serial.println(stringLights.toString().c_str());
+                Serial.println(homieDevice.toString().c_str());
+                Serial.println(homieCTRL.getDevice().toString().c_str());
+        }
+
+        //MQTTpub.attach(1.0, MQTTpubISR);
+        //checkTime.attach(30.0, timeISR);
+        ShedPub.once(50.0, shedPubISR);
+        //ShedPub.attach(50.0, shedPubISR);
 
         ClientID = String(CLIENTID) + DEVICE_NAME;
+        homieCTRL.connect(ClientID.c_str(), MQTT_USR, MQTT_PW);
         changeLvl("move_ms",50, 800);
-        delay(800);
-        changeLvl("move_ms",20, 800);
-        delay(800);
-        changeLvl("move_ms",50, 800);
-        delay(800);
         changeLvl("move_ms",0, 800);
-        delay(800);
+
 }
 
 void loop() {
-        if (!client.connected()) {
+        if (!homieCTRL.connected()) {
                 unsigned long now = millis();
                 if (now - lastReconnectAttempt > 5000) {
                         lastReconnectAttempt = now;
@@ -140,10 +175,8 @@ void loop() {
                         }
                 }
         }
-        client.loop();
+        homieCTRL.loop();
         httpServer.handleClient();
-        // dimmer();
-        //touchAutomat();
         funWithFlags();
 
         MDNS.update();
@@ -151,37 +184,20 @@ void loop() {
 
 void httpServer_ini() {
         char buffer[100];
-        sprintf(buffer, "%s%s", host, DEVICE_NAME);
+        sprintf(buffer, "%s", DEVICE_NAME);
         MDNS.begin(buffer);
         httpUpdater.setup(&httpServer, update_path, update_username, update_password);
         httpServer.begin();
         MDNS.addService("http", "tcp", 80);
-        Serial.printf("HTTPUpdateServer ready! Open http://%s.local%s in your "
-                      "browser and login with username '%s' and password '%s'\n",
-                      buffer, update_path, update_username, update_password);
+        if(SERIAL) Serial.printf("HTTPUpdateServer ready! Open http://%s.local%s in your "
+                                 "browser and login with username '%s' and password '%s'\n",
+                                 buffer, update_path, update_username, update_password);
         //------
 }
 
 boolean reconnect() {
         // Loop until we're reconnected
-        if (client.connect(ClientID.c_str(), MQTT_USR, MQTT_PW)) {
-                char buffer[100];
-                sprintf(buffer, "%s%s%s", "/lampen/", DEVICE_NAME, "/status");
-                client.subscribe(buffer, 1);
-                sprintf(buffer, "%s%s%s", "/lampen/", DEVICE_NAME, "/pwm");
-                client.subscribe(buffer, 1);
-                sprintf(buffer, "%s%s", "/", DEVICE_NAME);
-                client.subscribe(buffer, 1);
-                sprintf(buffer, "%s%s%s", "/actu/", DEVICE_NAME, "/cmd");
-                client.subscribe(buffer, 1);
-                announce();
-
-        } else {
-                Serial.print("MQTT conncetion failed, rc=");
-                Serial.print(client.state());
-                Serial.println(" try again in 5 seconds");
-        }
-        return client.connected();
+        return homieCTRL.connect(ClientID.c_str(), MQTT_USR, MQTT_PW);
 }
 
 void MQTTKeepTrack() {
@@ -221,41 +237,27 @@ void MQTTKeepTrack() {
         }
 }
 
-void announce(){
-        if(client.connected()) {
-                const int capacity = JSON_ARRAY_SIZE(2) + JSON_ARRAY_SIZE(3) + JSON_OBJECT_SIZE(8); //hiher memory use...
-                StaticJsonDocument<capacity> doc;
-                JsonObject root = doc.to<JsonObject>();
-                Serial.println(root.memoryUsage());
-                root["device"] = String(DEVICE_NAME);
-                root["ip"] = WiFi.localIP();
-                Serial.println(WiFi.localIP());
-                JsonArray cmdJ = root.createNestedArray("cmd");
-                for(int i = 0; i<2; i++) {
-                        Serial.print("cmd: ");
-                        Serial.println(cmdJ.add(cmd[i]));
-                }
-                JsonArray dataJ = root.createNestedArray("data");
-                for(int j = 0; j<3; j++) {
-                        Serial.print("data: ");
-                        Serial.println(dataJ.add(data[j]));
-                }
-                String output;
-                serializeJson(root, output);
-                uint8_t* buffer = (uint8_t*) malloc(output.length()+1);
-                output.getBytes(buffer, output.length()+1);
-                client.publish("/announce", buffer,output.length()+1);
-                free(buffer);
-
-                client.subscribe("/announce/fetch",1);
+void heartBeat(){
+        if(flag_ShedPub) {
+                long time = millis() / 1000;
+                string topic = "homie/" + string(DEVICE_NAME) + "/$stats/uptime";
+                char payload[20];
+                sprintf(payload, "%ld", time);
+                ShedPub.once(60.0, shedPubISR);
+                client.publish(topic.c_str(), payload,true);
+                topic = "homie/" + string(DEVICE_NAME) + "/$stats/interval";
+                client.publish(topic.c_str(), "60",true);
+                flag_ShedPub = 0;
         }
 }
 
 void funWithFlags() {
+        heartBeat();
         if (flag_MQTTpub) {
-                MQTTKeepTrack();
+                //MQTTKeepTrack();
+                heartBeat();
                 flag_MQTTpub = 0;
-                flag_ShedPub = 0;
+
         }
         if (flag_time) {
                 static unsigned long turnedOn = 0;
@@ -279,6 +281,53 @@ void funWithFlags() {
 }
 
 void callback(char *topic, byte *payload, unsigned int length) {
+        string topicString = string(topic);
+        if(SERIAL) Serial.println(topicString.c_str());
+
+        std::size_t found = topicString.find("dimmer/brightness/set");
+        if(found!=std::string::npos) {
+                char buffer[10];
+                snprintf(buffer, length + 1, "%s", payload);
+                double duty_f = atof(buffer);
+                dimmerMove((int)(duty_f*100.0));
+        }
+
+        found = topicString.find("string-lights/brightness/set");
+        if(found!=std::string::npos) {
+                char buffer[10];
+                snprintf(buffer, length + 1, "%s", payload);
+                double duty_f = atof(buffer);
+                lampMove((int)(duty_f*100.0));
+        }
+
+        found = topicString.find("dimmer/power/set");
+        if(found!=std::string::npos) {
+                char buffer[6];
+                snprintf(buffer, length + 1, "%s", payload);
+                if (!strcmp(buffer, "true")) {
+                        changeLvl("on");
+                        return;
+                }
+                if (!strcmp(buffer, "false")) {
+                        changeLvl("off");
+                        return;
+                }
+        }
+
+        found = topicString.find("string-lights/power/set");
+        if(found!=std::string::npos) {
+                char buffer[6];
+                snprintf(buffer, length + 1, "%s", payload);
+                if (!strcmp(buffer, "true")) {
+                        lampMove(100);
+                        return;
+                }
+                if (!strcmp(buffer, "false")) {
+                        lampMove(0);
+                        return;
+                }
+        }
+
         char buffer[100];
         sprintf(buffer, "%s%s%s", "/actu/", DEVICE_NAME, "/cmd");
         if (!strcmp(buffer, topic)) {
@@ -291,16 +340,23 @@ void callback(char *topic, byte *payload, unsigned int length) {
                         auto cmd = msg["cmd"];
                         if(cmd.containsKey("brightness")) {
                                 uint8_t lum = cmd["brightness"];
-                                int duty = lum/255*100;
-                                Serial.println(lum);
-                                Serial.println(duty);
-                                changeLvl("move",duty);
+                                if(SERIAL) Serial.println(lum);
+                                if((dimmer->getStatus() == 0) && (lum > 11)) {
+                                        changeLvl("on");
+                                }else{
+                                        if((dimmer->getStatus() == 1) && (lum <= 11)) {
+                                                changeLvl("off");
+                                        }else{
+                                                changeLvl("move",lum);
+                                        }
+                                }
+
                         }
                 }else{
-                        Serial.print("Couldnt parse Json Object from: ");
-                        Serial.println(topic);
-                        Serial.print("Error: ");
-                        Serial.println(err.c_str());
+                        if(SERIAL) Serial.print("Couldnt parse Json Object from: ");
+                        if(SERIAL) Serial.println(topic);
+                        if(SERIAL) Serial.print("Error: ");
+                        if(SERIAL) Serial.println(err.c_str());
 
                 }
         }
@@ -336,37 +392,119 @@ void callback(char *topic, byte *payload, unsigned int length) {
                         auto minutes = time["minutes"].as<unsigned long>();
                         auto seconds = time["seconds"].as<unsigned long>();
                         timeOn += (seconds+ minutes * 60 + hours * 60 * 60) * 1000;
-                        Serial.println(hours); Serial.println(minutes); Serial.println(seconds); Serial.println("");
+                        if(SERIAL) {
+                                Serial.println(hours); Serial.println(minutes);
+                                Serial.println(seconds); Serial.println("");
+                        }
                 }else{
-                        Serial.print("Couldnt parse Json Object from: "); Serial.println(topic);
-                        Serial.print("Error: ");
-                        Serial.println(err.c_str());
+                        if(SERIAL) Serial.print("Couldnt parse Json Object from: ");
+                        if(SERIAL) Serial.println(topic);
+                        if(SERIAL) Serial.print("Error: ");
+                        if(SERIAL) Serial.println(err.c_str());
                 }
 
                 client.unsubscribe(buffer);
         }
 
-        if(!strcmp("/announce/fetch",topic)) announce();
 }
 
 void changeLvl(String cmd,int duty, int time){
         if(!cmd.compareTo("move")) {
-                dimmer->move(duty);
-                lamps.move(duty);
+                dimmerMove(duty);
+                lampMove(duty);
         }else if(!cmd.compareTo("move_ms")) {
-                dimmer->move(duty,time);
-                lamps.move(duty,time);
+                dimmerMove(duty,time);
+                lampMove(duty,time);
         }else if(!cmd.compareTo("set")) {
-                dimmer->set(duty);
-                lamps.set(duty);
+                dimmerSet(duty);
+                lampSet(duty);
         }else if(!cmd.compareTo("on")) {
-                dimmer->on();
-                lamps.on();
+                dimmerOnOff(true);
+                lampOnOff(true);
         }else if(!cmd.compareTo("off")) {
-                dimmer->off();
-                lamps.off();
+                dimmerOnOff(false);
+                lampOnOff(false);
         }
 }
+
+void dimmerMove(int duty, int time){
+        if(time == 0) {
+                dimmer->move(duty);
+                Serial.println("move");
+        }else{
+                dimmer->move(duty,time);
+                Serial.println("move time");
+        }
+        dimmerMQTTUpdate();
+}
+void lampMove(int duty, int time){
+        if(time == 0) {
+                lamps.move(duty);
+                Serial.println("move");
+        }else{
+                lamps.move(duty,time);
+                Serial.println("move time");
+        }
+        lampMQTTUpdate();
+}
+void dimmerSet(int duty){
+        dimmer->set(duty);
+        dimmerMQTTUpdate();
+}
+void lampSet(int duty){
+        lamps.set(duty);
+        lampMQTTUpdate();
+}
+void dimmerOnOff(bool onoff){
+        if(onoff) {
+                dimmer->on();
+        }else{
+                dimmer->off();
+        }
+        dimmerMQTTUpdate();
+}
+void lampOnOff(bool onoff){
+        if(onoff) {
+                lamps.on();
+        }else{
+                lamps.off();
+        }
+        lampMQTTUpdate();
+}
+void dimmerMQTTUpdate(int time){
+        if(homieCTRL.connected()) {
+                delay(time);
+
+                char newDuty[6];
+                float duty_f = (float) dimmer->getDuty() / 100.0;
+                //itoa(dimmer->getDuty(),newDuty,10);
+                sprintf(newDuty,"%.3f",duty_f);
+                string power = "false";
+                if(dimmer->getStatus()) {
+                        power = "true";
+                }
+                client.publish("homie/nachttisch/dimmer/brightness",newDuty,true);
+                client.publish("homie/nachttisch/dimmer/power",power.c_str(),true);
+        }
+}
+void lampMQTTUpdate(int time){
+        if(homieCTRL.connected()) {
+                delay(time);
+
+                char newDuty[6];
+                float duty_f = (float) lamps.getDuty() / 100.0;
+                //itoa(lamps.getDuty(),newDuty,10);
+                sprintf(newDuty,"%.3f",duty_f);
+                string power = "false";
+                if(lamps.getStatus()) {
+                        power = "true";
+                }
+                client.publish("homie/nachttisch/string-lights/brightness",newDuty,true);
+                client.publish("homie/nachttisch/string-lights/power",power.c_str(),true);
+        }
+}
+
+
 
 void MQTTpubISR() {
         flag_MQTTpub = 1;

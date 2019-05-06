@@ -131,12 +131,12 @@ bool ACDimmer::ismoving() {
         }
 }
 
-int ACDimmer::getStatus() {
+bool ACDimmer::getStatus() {
         if (duty_save <= 10) {
-                status = 0;
+                status = false;
         }
         if (duty_save >= 11) {
-                status = 1;
+                status = true;
         }
         return status;
 }

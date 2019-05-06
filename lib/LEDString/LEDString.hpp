@@ -44,7 +44,7 @@ void set(int duty);
 void move(int duty, int time_ms = DIMMSPEED);
 void on();
 void off();
-int getStatus();
+bool getStatus();
 int getDuty();
 void up();
 void down();

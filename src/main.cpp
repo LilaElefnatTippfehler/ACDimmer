@@ -37,7 +37,6 @@
 #include "config.h"
 #include "touchAutomat.hpp"
 #include <Arduino.h>
-#include <ArduinoJson.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266HTTPUpdateServer.h>
 #include <ESP8266WebServer.h>
@@ -46,7 +45,7 @@
 #include <PubSubClient.h>
 #include "homie.hpp"
 
-#define SERIAL true
+#define SERIAL false
 
 #define LAMPS D1
 #define TOUCH D2
@@ -73,6 +72,7 @@ void lampOnOff(bool onoff);
 void dimmerMQTTUpdate(int time = 1000);
 void lampMQTTUpdate(int time = 1000);
 void announce();
+void handleStatus();
 
 //---------Announce Arrays----------------
 //You'll also have to change announce function
@@ -187,12 +187,31 @@ void httpServer_ini() {
         sprintf(buffer, "%s", DEVICE_NAME);
         MDNS.begin(buffer);
         httpUpdater.setup(&httpServer, update_path, update_username, update_password);
+        httpServer.on("/status",handleStatus);
         httpServer.begin();
         MDNS.addService("http", "tcp", 80);
         if(SERIAL) Serial.printf("HTTPUpdateServer ready! Open http://%s.local%s in your "
                                  "browser and login with username '%s' and password '%s'\n",
                                  buffer, update_path, update_username, update_password);
         //------
+}
+
+void handleStatus() {
+        String message;
+        message += "name: " + String(DEVICE_NAME) + "\n";
+        message += "IP: " + WiFi.localIP().toString() + "\n";
+        message +="free Heap: " + String(ESP.getFreeHeap()) + "\n";
+        message += "heap Fragmentation: " + String(ESP.getHeapFragmentation()) + "\n";
+        message += "MaxFreeBlockSize: " + String(ESP.getMaxFreeBlockSize()) + "\n";
+        message += "ChipId: " + String(ESP.getChipId()) + "\n";
+        message += "CoreVersion: " + String(ESP.getCoreVersion()) + "\n";
+        message += "SdkVersion: " + String(ESP.getSdkVersion()) + "\n";
+        message += "SketchSize: " + String(ESP.getSketchSize()) + "\n";
+        message += "FreeSketchSpace: " + String(ESP.getFreeSketchSpace()) + "\n";
+        message += "FlashChipId: " + String(ESP.getFlashChipId()) + "\n";
+        message += "FlashChipSize: " + String(ESP.getFlashChipSize()) + "\n";
+        message += "FlashChipRealSize: " + String(ESP.getFlashChipRealSize()) + "\n";
+        httpServer.send(200, "text/plain", message);
 }
 
 boolean reconnect() {
@@ -210,29 +229,7 @@ void MQTTKeepTrack() {
                 if (old_status != dimmer->getStatus() || old_duty != dimmer->getDuty() || flag_ShedPub) {
                         flag_time = 1;
 
-                        const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
-                        StaticJsonDocument<capacity> root; // New ArduinoJson 6 syntax
-                        old_status = dimmer->getStatus();
-                        old_duty = dimmer->getDuty();
-                        root["level"].set(old_duty);
 
-                        root["status"].set(old_status);
-                        JsonObject time = root.createNestedObject("On time");
-                        time["hours"].set(timeOn / 1000 / 60 / 60);
-                        time["minutes"].set(timeOn / 1000 / 60 % 60);
-                        time["seconds"].set(timeOn / 1000 % 60);
-
-                        String topic = "/" + String(DEVICE_NAME);
-                        char* buffer = (char*) malloc(topic.length()+1);
-                        topic.toCharArray(buffer, topic.length()+1);
-                        String output = "";
-                        serializeJson(root, output); // New ArduinoJson 6 syntax
-                        uint8_t* buffer2 = (uint8_t*) malloc(output.length()+1);
-                        output.getBytes(buffer2, output.length()+1);
-                        client.publish(buffer, buffer2,output.length()+1,true);
-
-                        free(buffer);
-                        free(buffer2);
                 }
         }
 }
@@ -289,7 +286,7 @@ void callback(char *topic, byte *payload, unsigned int length) {
                 char buffer[10];
                 snprintf(buffer, length + 1, "%s", payload);
                 double duty_f = atof(buffer);
-                dimmerMove((int)(duty_f*100.0));
+                dimmerSet((int)(duty_f*100.0));
         }
 
         found = topicString.find("string-lights/brightness/set");
@@ -328,92 +325,14 @@ void callback(char *topic, byte *payload, unsigned int length) {
                 }
         }
 
-        char buffer[100];
-        sprintf(buffer, "%s%s%s", "/actu/", DEVICE_NAME, "/cmd");
-        if (!strcmp(buffer, topic)) {
-                const int capacity = 2 * JSON_OBJECT_SIZE(4) + JSON_OBJECT_SIZE(5);
-                StaticJsonDocument<capacity> msg;
-                DeserializationError err = deserializeJson(msg, payload);
-                String data;
-                if(!err) {
-
-                        auto cmd = msg["cmd"];
-                        if(cmd.containsKey("brightness")) {
-                                uint8_t lum = cmd["brightness"];
-                                if(SERIAL) Serial.println(lum);
-                                if((dimmer->getStatus() == 0) && (lum > 11)) {
-                                        changeLvl("on");
-                                }else{
-                                        if((dimmer->getStatus() == 1) && (lum <= 11)) {
-                                                changeLvl("off");
-                                        }else{
-                                                changeLvl("move",lum);
-                                        }
-                                }
-
-                        }
-                }else{
-                        if(SERIAL) Serial.print("Couldnt parse Json Object from: ");
-                        if(SERIAL) Serial.println(topic);
-                        if(SERIAL) Serial.print("Error: ");
-                        if(SERIAL) Serial.println(err.c_str());
-
-                }
-        }
-        sprintf(buffer, "%s%s%s", "/lampen/", DEVICE_NAME, "/status");
-        if (!strcmp(buffer, topic)) {
-                char buffer[10];
-                snprintf(buffer, length + 1, "%s", payload);
-                if (!strcmp(buffer, "1")) {
-                        changeLvl("on");
-                        return;
-                }
-                if (!strcmp(buffer, "0")) {
-                        changeLvl("off");
-                        return;
-                }
-        }
-        sprintf(buffer, "%s%s%s", "/lampen/", DEVICE_NAME, "/pwm");
-        if (!strcmp(buffer, topic)) {
-                int duty;
-                char buffer[10];
-                snprintf(buffer, length + 1, "%s", payload);
-                duty = atoi(buffer);
-                changeLvl("move",duty);
-        }
-        sprintf(buffer,"%s%s","/",DEVICE_NAME);
-        if(!strcmp(buffer,topic)) {
-                const int capacity = JSON_OBJECT_SIZE(3)+JSON_OBJECT_SIZE(3);
-                StaticJsonDocument<capacity> msg;
-                DeserializationError err = deserializeJson(msg, payload);
-                if(!err) {
-                        auto time = msg["On time"];
-                        auto hours = time["hours"].as<unsigned long>();
-                        auto minutes = time["minutes"].as<unsigned long>();
-                        auto seconds = time["seconds"].as<unsigned long>();
-                        timeOn += (seconds+ minutes * 60 + hours * 60 * 60) * 1000;
-                        if(SERIAL) {
-                                Serial.println(hours); Serial.println(minutes);
-                                Serial.println(seconds); Serial.println("");
-                        }
-                }else{
-                        if(SERIAL) Serial.print("Couldnt parse Json Object from: ");
-                        if(SERIAL) Serial.println(topic);
-                        if(SERIAL) Serial.print("Error: ");
-                        if(SERIAL) Serial.println(err.c_str());
-                }
-
-                client.unsubscribe(buffer);
-        }
-
 }
 
 void changeLvl(String cmd,int duty, int time){
         if(!cmd.compareTo("move")) {
-                dimmerMove(duty);
+                dimmerSet(duty);
                 lampMove(duty);
         }else if(!cmd.compareTo("move_ms")) {
-                dimmerMove(duty,time);
+                dimmerSet(duty);
                 lampMove(duty,time);
         }else if(!cmd.compareTo("set")) {
                 dimmerSet(duty);
@@ -430,20 +349,20 @@ void changeLvl(String cmd,int duty, int time){
 void dimmerMove(int duty, int time){
         if(time == 0) {
                 dimmer->move(duty);
-                Serial.println("move");
+                if(SERIAL) Serial.println("move");
         }else{
                 dimmer->move(duty,time);
-                Serial.println("move time");
+                if(SERIAL) Serial.println("move time");
         }
         dimmerMQTTUpdate();
 }
 void lampMove(int duty, int time){
         if(time == 0) {
                 lamps.move(duty);
-                Serial.println("move");
+                if(SERIAL) Serial.println("move");
         }else{
                 lamps.move(duty,time);
-                Serial.println("move time");
+                if(SERIAL) Serial.println("move time");
         }
         lampMQTTUpdate();
 }

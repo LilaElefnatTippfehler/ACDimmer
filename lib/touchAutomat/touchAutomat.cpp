@@ -16,7 +16,7 @@ void touchAutomat::init(void (*function)(String,int,int ), uint8_t touchPin){
         attachInterrupt(digitalPinToInterrupt(touchPin), this->touchISR, CHANGE);
 }
 
-void touchAutomat::touchISR(){
+void ICACHE_RAM_ATTR touchAutomat::touchISR(){
         touchAutomat::instance()->Tisr();
 }
 

@@ -23,13 +23,19 @@ void ACDimmer::init(uint8_t ZC_t, uint8_t PWM_t){
         ZC = ZC_t; PWM = PWM_t;
         pinMode(ZC, INPUT_PULLUP);
         pinMode(PWM, OUTPUT);
+        if(SERIAL) Serial.println("after pinMode");
         timer1_isr_init();
+        if(SERIAL) Serial.println("befor timer1 interrupt");
         timer1_attachInterrupt(this->handlerTimer);
+        if(SERIAL) Serial.println("befor timer1 enable");
         timer1_enable(TIM_DIV16, TIM_EDGE, TIM_SINGLE);
+        if(SERIAL) Serial.println("after all timer1");
         attachInterrupt(digitalPinToInterrupt(ZC), this->initPeriod, FALLING);
+        if(SERIAL) Serial.println("after initPeriod");
         while (!this->getPeriod());
         detachInterrupt(digitalPinToInterrupt(ZC));
         attachInterrupt(digitalPinToInterrupt(ZC), this->zeroCross, FALLING);
+        if(SERIAL) Serial.println("after zeroCross");
 
         this->set(50);
         this->set(1);
@@ -39,6 +45,7 @@ int ACDimmer::getPeriod(){
         int temp = 0;
         static unsigned long lastZC = 0;
         static long periodBuffer[PERIODBUFFER];
+        ESP.wdtFeed();
         if (lastZC == 0) {
                 lastZC = thisZC;
                 return 0;
@@ -153,7 +160,7 @@ int ACDimmer::getDuty() {
         return duty_save;
 }
 
-void ACDimmer::initPeriod() {
+void ICACHE_RAM_ATTR ACDimmer::initPeriod() {
         ACDimmer::instance()->initPerISR();
 }
 
@@ -162,7 +169,7 @@ void ACDimmer::initPerISR(){
         readings++;
 }
 
-void ACDimmer::zeroCross(){
+void ICACHE_RAM_ATTR ACDimmer::zeroCross(){
         ACDimmer::instance()->zcISR();
 }
 
@@ -170,7 +177,7 @@ void ACDimmer::zcISR(){
         timer1_write(this->tLow * 5);
 }
 
-void ACDimmer::handlerTimer(){
+void ICACHE_RAM_ATTR ACDimmer::handlerTimer(){
         ACDimmer::instance()->TimerISR();
 }
 

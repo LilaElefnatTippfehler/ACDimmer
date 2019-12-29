@@ -109,10 +109,6 @@ Homie homieCTRL = Homie(&client);
 void setup() {
         Serial.begin(115200);
         while (!Serial);
-        //init_dimmer();
-        dimmer->init(ZC,PWM);
-        lamps.init();
-        ta->init(changeLvl,TOUCH);
         WiFi.mode(WIFI_STA);
         WiFi.begin(WIFI_SSID, WIFI_PASS);
         while (WiFi.status() != WL_CONNECTED) {
@@ -123,10 +119,15 @@ void setup() {
         if(SERIAL) Serial.print("Connected, IP address: ");
         if(SERIAL) Serial.println(WiFi.localIP());
 
+        //init_dimmer();
+        dimmer->init(ZC,PWM);
+        lamps.init();
+        ta->init(changeLvl,TOUCH);
+
+
         httpServer_ini();
-        HomieDevice homieDevice = HomieDevice(DEVICE_NAME, "Nachttisch", WiFi.localIP().toString().c_str(),
-                                              WiFi.macAddress().c_str(), FW_NAME, FW_VERSION,
-                                              "esp8266", "60");
+        HomieDevice homieDevice = HomieDevice(DEVICE_NAME, "Nachttisch", "",
+                                              CHIP_TYPE);
 
         HomieNode stringLights = HomieNode("string-lights", "String Lights", "LEDDimmer");
         HomieNode dimmer = HomieNode("dimmer", "Dimmer", "ACDimmer");
@@ -151,11 +152,8 @@ void setup() {
                 Serial.println(homieDevice.toString().c_str());
                 Serial.println(homieCTRL.getDevice().toString().c_str());
         }
-
-        //MQTTpub.attach(1.0, MQTTpubISR);
-        //checkTime.attach(30.0, timeISR);
         ShedPub.once(50.0, shedPubISR);
-        //ShedPub.attach(50.0, shedPubISR);
+        flag_ShedPub = 1;
 
         ClientID = String(CLIENTID) + DEVICE_NAME;
         homieCTRL.connect(ClientID.c_str(), MQTT_USR, MQTT_PW);
@@ -176,16 +174,17 @@ void loop() {
                 }
         }
         homieCTRL.loop();
+        MDNS.update();
         httpServer.handleClient();
         funWithFlags();
-
-        MDNS.update();
 }
 
 void httpServer_ini() {
         char buffer[100];
         sprintf(buffer, "%s", DEVICE_NAME);
-        MDNS.begin(buffer);
+        if(!MDNS.begin(buffer)) {
+                if(SERIAL) Serial.printf("Error setting up MDNS responder!");
+        }
         httpUpdater.setup(&httpServer, update_path, update_username, update_password);
         httpServer.on("/status",handleStatus);
         httpServer.begin();
@@ -199,6 +198,7 @@ void httpServer_ini() {
 void handleStatus() {
         String message;
         message += "name: " + String(DEVICE_NAME) + "\n";
+        message += "chip: " + String(CHIP_TYPE) + "\n";
         message += "IP: " + WiFi.localIP().toString() + "\n";
         message +="free Heap: " + String(ESP.getFreeHeap()) + "\n";
         message += "heap Fragmentation: " + String(ESP.getHeapFragmentation()) + "\n";
@@ -234,28 +234,7 @@ void MQTTKeepTrack() {
         }
 }
 
-void heartBeat(){
-        if(flag_ShedPub) {
-                long time = millis() / 1000;
-                string topic = "homie/" + string(DEVICE_NAME) + "/$stats/uptime";
-                char payload[20];
-                sprintf(payload, "%ld", time);
-                ShedPub.once(60.0, shedPubISR);
-                client.publish(topic.c_str(), payload,true);
-                topic = "homie/" + string(DEVICE_NAME) + "/$stats/interval";
-                client.publish(topic.c_str(), "60",true);
-                flag_ShedPub = 0;
-        }
-}
-
 void funWithFlags() {
-        heartBeat();
-        if (flag_MQTTpub) {
-                //MQTTKeepTrack();
-                heartBeat();
-                flag_MQTTpub = 0;
-
-        }
         if (flag_time) {
                 static unsigned long turnedOn = 0;
                 static int lastStatus = 0;
@@ -424,10 +403,6 @@ void lampMQTTUpdate(int time){
 }
 
 
-
-void MQTTpubISR() {
-        flag_MQTTpub = 1;
-}
 
 void timeISR() {
         flag_time = 1;

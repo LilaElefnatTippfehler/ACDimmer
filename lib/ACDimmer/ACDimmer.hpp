@@ -23,6 +23,7 @@
 #define EXPPERIOD 10000 // Expected Period/2
 #define PERIODBUFFER 300
 #define DIMMSPEED 1000
+#define SERIAL 0
 
 class ACDimmer {
 

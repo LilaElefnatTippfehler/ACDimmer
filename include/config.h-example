@@ -13,4 +13,7 @@
 #define MQTT_PW "YOUR PASSWD ON YOUR BROKER"
 
 //***************************DEVICE NAME***********************************
-#define DEVICE_NAME "MyName"
+#define DEVICE_NAME "MY DEVICE NAME"
+#define CHIP_TYPE "BOARD TYPE"
+//***************************PINS*******************************************/
+#define LS PIN
